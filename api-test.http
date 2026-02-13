@@ -1,0 +1,313 @@
+### Authentication Endpoints ###
+
+@baseUrl = http://localhost:5000/api
+@token = YOUR_TOKEN_HERE
+
+### Register Admin Apotik
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Admin Apotik 1",
+  "email": "admin@apotik.com",
+  "password": "admin123",
+  "role": "admin_apotik",
+  "phoneNumber": "081234567890"
+}
+
+### Register Dokter
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Dr. John Doe",
+  "email": "dokter@apotik.com",
+  "password": "dokter123",
+  "role": "dokter",
+  "phoneNumber": "081234567891",
+  "specialization": "Dokter Umum",
+  "licenseNumber": "SIP123456789"
+}
+
+### Login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "dokter@apotik.com",
+  "password": "dokter123"
+}
+
+### Get My Profile
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
+
+### Logout
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{token}}
+
+### Update Profile
+PUT {{baseUrl}}/auth/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Dr. John Doe Updated",
+  "phoneNumber": "081234567899"
+}
+
+### Patient Endpoints ###
+
+### Get All Patients
+GET {{baseUrl}}/patients?page=1&limit=10
+Authorization: Bearer {{token}}
+
+### Search Patients
+GET {{baseUrl}}/patients?search=john
+Authorization: Bearer {{token}}
+
+### Get Single Patient
+GET {{baseUrl}}/patients/PATIENT_ID
+Authorization: Bearer {{token}}
+
+### Create Patient (Dokter Only)
+POST {{baseUrl}}/patients
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Jane Doe",
+  "dateOfBirth": "1990-05-15",
+  "gender": "Perempuan",
+  "address": "Jl. Sudirman No. 123, Jakarta",
+  "phoneNumber": "081234567892",
+  "email": "jane@example.com",
+  "idNumber": "3171234567890123",
+  "allergies": ["Penisilin"],
+  "bloodType": "A+"
+}
+
+### Update Patient
+PUT {{baseUrl}}/patients/PATIENT_ID
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "phoneNumber": "081234567893",
+  "address": "Jl. Thamrin No. 456, Jakarta"
+}
+
+### Delete Patient
+DELETE {{baseUrl}}/patients/PATIENT_ID
+Authorization: Bearer {{token}}
+
+### Medicine Endpoints ###
+
+### Get All Medicines
+GET {{baseUrl}}/medicines?page=1&limit=10
+Authorization: Bearer {{token}}
+
+### Search Medicines
+GET {{baseUrl}}/medicines?search=para
+Authorization: Bearer {{token}}
+
+### Filter by Category
+GET {{baseUrl}}/medicines?category=Tablet
+Authorization: Bearer {{token}}
+
+### Get Low Stock Medicines
+GET {{baseUrl}}/medicines?lowStock=true
+Authorization: Bearer {{token}}
+
+### Get Single Medicine
+GET {{baseUrl}}/medicines/MEDICINE_ID
+Authorization: Bearer {{token}}
+
+### Create Medicine (Admin Only)
+POST {{baseUrl}}/medicines
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "code": "MED001",
+  "name": "Paracetamol",
+  "genericName": "Paracetamol",
+  "category": "Tablet",
+  "manufacturer": "Kimia Farma",
+  "description": "Obat penurun panas dan pereda nyeri",
+  "dosage": "500mg",
+  "unit": "Tablet",
+  "stock": 100,
+  "minStock": 20,
+  "price": 5000,
+  "expiryDate": "2025-12-31",
+  "batchNumber": "BATCH001"
+}
+
+### Update Medicine
+PUT {{baseUrl}}/medicines/MEDICINE_ID
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "price": 5500,
+  "stock": 150
+}
+
+### Update Medicine Stock - Add
+PATCH {{baseUrl}}/medicines/MEDICINE_ID/stock
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "quantity": 50,
+  "operation": "add"
+}
+
+### Update Medicine Stock - Subtract
+PATCH {{baseUrl}}/medicines/MEDICINE_ID/stock
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "quantity": 10,
+  "operation": "subtract"
+}
+
+### Delete Medicine
+DELETE {{baseUrl}}/medicines/MEDICINE_ID
+Authorization: Bearer {{token}}
+
+### Get Low Stock Alert
+GET {{baseUrl}}/medicines/alerts/low-stock
+Authorization: Bearer {{token}}
+
+### Get Expiring Medicines (30 days)
+GET {{baseUrl}}/medicines/alerts/expiring?days=30
+Authorization: Bearer {{token}}
+
+### Prescription Endpoints ###
+
+### Get All Prescriptions
+GET {{baseUrl}}/prescriptions?page=1&limit=10
+Authorization: Bearer {{token}}
+
+### Filter by Status
+GET {{baseUrl}}/prescriptions?status=pending
+Authorization: Bearer {{token}}
+
+### Get Single Prescription
+GET {{baseUrl}}/prescriptions/PRESCRIPTION_ID
+Authorization: Bearer {{token}}
+
+### Create Prescription (Dokter Only)
+POST {{baseUrl}}/prescriptions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "patient": "PATIENT_ID",
+  "medicines": [
+    {
+      "medicine": "MEDICINE_ID_1",
+      "quantity": 10,
+      "dosageInstructions": "3x sehari 1 tablet sesudah makan",
+      "duration": "3 hari"
+    },
+    {
+      "medicine": "MEDICINE_ID_2",
+      "quantity": 1,
+      "dosageInstructions": "1x sehari 5ml sebelum tidur",
+      "duration": "7 hari"
+    }
+  ],
+  "diagnosis": "Demam dan Batuk",
+  "notes": "Banyak istirahat, minum air putih yang cukup"
+}
+
+### Update Prescription Status to "disiapkan" (Admin Only)
+PATCH {{baseUrl}}/prescriptions/PRESCRIPTION_ID/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "disiapkan"
+}
+
+### Update Prescription Status to "selesai" (Admin Only)
+PATCH {{baseUrl}}/prescriptions/PRESCRIPTION_ID/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "selesai"
+}
+
+### Cancel Prescription (Dokter Only)
+DELETE {{baseUrl}}/prescriptions/PRESCRIPTION_ID
+Authorization: Bearer {{token}}
+
+### Transfer Endpoints ###
+
+### Get All Transfers
+GET {{baseUrl}}/transfers?page=1&limit=10
+Authorization: Bearer {{token}}
+
+### Filter by Type
+GET {{baseUrl}}/transfers?type=request
+Authorization: Bearer {{token}}
+
+### Filter by Status
+GET {{baseUrl}}/transfers?status=pending
+Authorization: Bearer {{token}}
+
+### Get Single Transfer
+GET {{baseUrl}}/transfers/TRANSFER_ID
+Authorization: Bearer {{token}}
+
+### Create Request to Another Pharmacy (Admin Only)
+POST {{baseUrl}}/transfers/request
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "toPharmacy": "Apotik Sehat Sejahtera",
+  "medicines": [
+    {
+      "medicine": "MEDICINE_ID",
+      "quantity": 50,
+      "notes": "Stok menipis"
+    }
+  ],
+  "urgency": "tinggi",
+  "notes": "Mohon segera diproses"
+}
+
+### Create Receive from Another Pharmacy (Admin Only)
+POST {{baseUrl}}/transfers/receive
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "fromPharmacy": "Apotik Maju Jaya",
+  "medicines": [
+    {
+      "medicine": "MEDICINE_ID",
+      "quantity": 100
+    }
+  ],
+  "notes": "Pengiriman rutin bulanan"
+}
+
+### Update Transfer Status to "diterima" (Admin Only)
+PATCH {{baseUrl}}/transfers/TRANSFER_ID/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "diterima"
+}
+
+### Cancel Transfer
+DELETE {{baseUrl}}/transfers/TRANSFER_ID
+Authorization: Bearer {{token}}
