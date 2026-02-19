@@ -8,8 +8,8 @@ const errorHandler = (err, req, res, next) => {
     statusCode = 404;
   }
 
-  // Mongoose duplicate key
-  if (err.code === 11000) {
+  // Duplicate key (MySQL / Mongoose fallback)
+  if (err.code === 'ER_DUP_ENTRY' || err.code === 11000) {
     message = 'Data duplikat ditemukan';
     statusCode = 400;
   }

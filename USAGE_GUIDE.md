@@ -7,15 +7,25 @@
    npm install
    ```
 
-2. **Setup MongoDB**
-   - Pastikan MongoDB terinstall dan berjalan
-   - Atau gunakan MongoDB Atlas (cloud)
+2. **Setup MySQL / MariaDB (XAMPP)**
+  - Pastikan MySQL di XAMPP berjalan
+  - Sesuaikan kredensial di `.env` (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`)
 
-3. **Konfigurasi Environment**
+3. **Inisialisasi Schema Database**
+  ```bash
+  npm run db:init
+  ```
+
+4. **Konfigurasi Environment**
    - Copy `.env.example` ke `.env`
    - Sesuaikan nilai di `.env`
 
-4. **Jalankan Server**
+5. **(Opsional) Seed Data Demo**
+  ```bash
+  npm run seed
+  ```
+
+6. **Jalankan Server**
    ```bash
    npm run dev
    ```

@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const asyncHandler = require('express-async-handler');
-const User = require('../models/User');
+const { query } = require('../config/mysql');
 
 // Protect routes - memerlukan authentication
 exports.protect = asyncHandler(async (req, res, next) => {
@@ -18,7 +18,30 @@ exports.protect = asyncHandler(async (req, res, next) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
       // Ambil user dari token
-      req.user = await User.findById(decoded.id).select('-password');
+      const users = await query(
+        `SELECT
+          id AS _id,
+          name,
+          email,
+          role,
+          phone_number AS phoneNumber,
+          specialization,
+          license_number AS licenseNumber,
+          is_active AS isActive,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM users
+        WHERE id = ?
+        LIMIT 1`,
+        [decoded.id]
+      );
+
+      req.user = users[0]
+        ? {
+            ...users[0],
+            isActive: Boolean(users[0].isActive),
+          }
+        : null;
 
       if (!req.user) {
         res.status(401);

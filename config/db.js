@@ -1,13 +1,13 @@
-const mongoose = require('mongoose');
+const { pool } = require('./mysql');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    const connection = await pool.getConnection();
+    await connection.ping();
+    console.log(
+      `MySQL Connected: ${process.env.DB_HOST || '127.0.0.1'}:${process.env.DB_PORT || 3306}`
+    );
+    connection.release();
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exit(1);

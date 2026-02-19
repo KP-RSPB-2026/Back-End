@@ -1,47 +1,101 @@
 const asyncHandler = require('express-async-handler');
-const Medicine = require('../models/Medicine');
+const { query } = require('../config/mysql');
+
+const mapMedicine = (row) => ({
+  _id: row._id,
+  code: row.code,
+  name: row.name,
+  genericName: row.genericName,
+  category: row.category,
+  manufacturer: row.manufacturer,
+  description: row.description,
+  dosage: row.dosage,
+  unit: row.unit,
+  stock: Number(row.stock),
+  minStock: Number(row.minStock),
+  price: Number(row.price),
+  expiryDate: row.expiryDate,
+  batchNumber: row.batchNumber,
+  isActive: Boolean(row.isActive),
+  sideEffects: row.sideEffects ? JSON.parse(row.sideEffects) : [],
+  contraindications: row.contraindications
+    ? JSON.parse(row.contraindications)
+    : [],
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
 
 // @desc    Get all medicines
 // @route   GET /api/medicines
 // @access  Private
 exports.getMedicines = asyncHandler(async (req, res) => {
   const { search, category, lowStock, page = 1, limit = 10 } = req.query;
+  const currentPage = Number(page);
+  const rowLimit = Number(limit);
+  const offset = (currentPage - 1) * rowLimit;
 
-  let query = { isActive: true };
+  const params = [];
+  let whereClause = 'WHERE is_active = 1';
 
-  // Search by name, generic name, or code
   if (search) {
-    query.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { genericName: { $regex: search, $options: 'i' } },
-      { code: { $regex: search, $options: 'i' } },
-    ];
+    whereClause += ' AND (name LIKE ? OR generic_name LIKE ? OR code LIKE ?)';
+    const wildcard = `%${search}%`;
+    params.push(wildcard, wildcard, wildcard);
   }
 
-  // Filter by category
   if (category) {
-    query.category = category;
+    whereClause += ' AND category = ?';
+    params.push(category);
   }
 
-  // Filter low stock items
   if (lowStock === 'true') {
-    query.$expr = { $lte: ['$stock', '$minStock'] };
+    whereClause += ' AND stock <= min_stock';
   }
 
-  const medicines = await Medicine.find(query)
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
-    .sort({ name: 1 });
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    ${whereClause}
+    ORDER BY name ASC
+    LIMIT ? OFFSET ?`,
+    [...params, rowLimit, offset]
+  );
 
-  const count = await Medicine.countDocuments(query);
+  const countResult = await query(
+    `SELECT COUNT(*) AS total
+     FROM medicines
+     ${whereClause}`,
+    params
+  );
+
+  const count = countResult[0].total;
 
   res.json({
     success: true,
-    data: medicines,
+    data: medicines.map(mapMedicine),
     pagination: {
       total: count,
-      page: Number(page),
-      pages: Math.ceil(count / limit),
+      page: currentPage,
+      pages: Math.ceil(count / rowLimit),
     },
   });
 });
@@ -50,7 +104,34 @@ exports.getMedicines = asyncHandler(async (req, res) => {
 // @route   GET /api/medicines/:id
 // @access  Private
 exports.getMedicine = asyncHandler(async (req, res) => {
-  const medicine = await Medicine.findById(req.params.id);
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE id = ?
+    LIMIT 1`,
+    [req.params.id]
+  );
+
+  const medicine = medicines[0];
 
   if (!medicine) {
     res.status(404);
@@ -59,7 +140,7 @@ exports.getMedicine = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: medicine,
+    data: mapMedicine(medicine),
   });
 });
 
@@ -67,11 +148,95 @@ exports.getMedicine = asyncHandler(async (req, res) => {
 // @route   POST /api/medicines
 // @access  Private (Admin Apotik)
 exports.createMedicine = asyncHandler(async (req, res) => {
-  const medicine = await Medicine.create(req.body);
+  const {
+    code,
+    name,
+    genericName,
+    category,
+    manufacturer,
+    description,
+    dosage,
+    unit,
+    stock,
+    minStock,
+    price,
+    expiryDate,
+    batchNumber,
+    sideEffects,
+    contraindications,
+  } = req.body;
+
+  const result = await query(
+    `INSERT INTO medicines
+      (
+        code,
+        name,
+        generic_name,
+        category,
+        manufacturer,
+        description,
+        dosage,
+        unit,
+        stock,
+        min_stock,
+        price,
+        expiry_date,
+        batch_number,
+        side_effects,
+        contraindications
+      )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      code,
+      name,
+      genericName || null,
+      category,
+      manufacturer || null,
+      description || null,
+      dosage || null,
+      unit,
+      stock ?? 0,
+      minStock ?? 10,
+      price,
+      expiryDate || null,
+      batchNumber || null,
+      JSON.stringify(sideEffects || []),
+      JSON.stringify(contraindications || []),
+    ]
+  );
+
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE id = ?
+    LIMIT 1`,
+    [result.insertId]
+  );
+
+  const medicine = medicines[0];
 
   res.status(201).json({
     success: true,
-    data: medicine,
+    data: mapMedicine(medicine),
   });
 });
 
@@ -79,21 +244,87 @@ exports.createMedicine = asyncHandler(async (req, res) => {
 // @route   PUT /api/medicines/:id
 // @access  Private (Admin Apotik)
 exports.updateMedicine = asyncHandler(async (req, res) => {
-  let medicine = await Medicine.findById(req.params.id);
+  const existing = await query('SELECT id FROM medicines WHERE id = ? LIMIT 1', [
+    req.params.id,
+  ]);
 
-  if (!medicine) {
+  if (existing.length === 0) {
     res.status(404);
     throw new Error('Obat tidak ditemukan');
   }
 
-  medicine = await Medicine.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true,
+  const fieldMap = {
+    code: 'code',
+    name: 'name',
+    genericName: 'generic_name',
+    category: 'category',
+    manufacturer: 'manufacturer',
+    description: 'description',
+    dosage: 'dosage',
+    unit: 'unit',
+    stock: 'stock',
+    minStock: 'min_stock',
+    price: 'price',
+    expiryDate: 'expiry_date',
+    batchNumber: 'batch_number',
+    isActive: 'is_active',
+    sideEffects: 'side_effects',
+    contraindications: 'contraindications',
+  };
+
+  const updates = [];
+  const params = [];
+
+  Object.entries(fieldMap).forEach(([key, column]) => {
+    if (req.body[key] !== undefined) {
+      updates.push(`${column} = ?`);
+      if (key === 'sideEffects' || key === 'contraindications') {
+        params.push(JSON.stringify(req.body[key] || []));
+      } else if (key === 'isActive') {
+        params.push(req.body[key] ? 1 : 0);
+      } else {
+        params.push(req.body[key]);
+      }
+    }
   });
+
+  if (updates.length > 0) {
+    params.push(req.params.id);
+    await query(`UPDATE medicines SET ${updates.join(', ')} WHERE id = ?`, params);
+  }
+
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE id = ?
+    LIMIT 1`,
+    [req.params.id]
+  );
+
+  const medicine = medicines[0];
 
   res.json({
     success: true,
-    data: medicine,
+    data: mapMedicine(medicine),
   });
 });
 
@@ -103,31 +334,92 @@ exports.updateMedicine = asyncHandler(async (req, res) => {
 exports.updateStock = asyncHandler(async (req, res) => {
   const { quantity, operation } = req.body; // operation: 'add' or 'subtract'
 
-  const medicine = await Medicine.findById(req.params.id);
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE id = ?
+    LIMIT 1`,
+    [req.params.id]
+  );
+
+  const medicine = medicines[0];
 
   if (!medicine) {
     res.status(404);
     throw new Error('Obat tidak ditemukan');
   }
 
+  let updatedStock = Number(medicine.stock);
+
   if (operation === 'add') {
-    medicine.stock += quantity;
+    updatedStock += Number(quantity);
   } else if (operation === 'subtract') {
-    if (medicine.stock < quantity) {
+    if (updatedStock < Number(quantity)) {
       res.status(400);
       throw new Error('Stok tidak mencukupi');
     }
-    medicine.stock -= quantity;
+    updatedStock -= Number(quantity);
   } else {
     res.status(400);
     throw new Error('Operasi tidak valid');
   }
 
-  await medicine.save();
+  await query('UPDATE medicines SET stock = ? WHERE id = ?', [
+    updatedStock,
+    req.params.id,
+  ]);
+
+  const updatedRows = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE id = ?
+    LIMIT 1`,
+    [req.params.id]
+  );
+
+  const updatedMedicine = updatedRows[0];
 
   res.json({
     success: true,
-    data: medicine,
+    data: mapMedicine(updatedMedicine),
   });
 });
 
@@ -135,15 +427,16 @@ exports.updateStock = asyncHandler(async (req, res) => {
 // @route   DELETE /api/medicines/:id
 // @access  Private (Admin Apotik)
 exports.deleteMedicine = asyncHandler(async (req, res) => {
-  const medicine = await Medicine.findById(req.params.id);
+  const medicines = await query('SELECT id FROM medicines WHERE id = ? LIMIT 1', [
+    req.params.id,
+  ]);
 
-  if (!medicine) {
+  if (medicines.length === 0) {
     res.status(404);
     throw new Error('Obat tidak ditemukan');
   }
 
-  medicine.isActive = false;
-  await medicine.save();
+  await query('UPDATE medicines SET is_active = 0 WHERE id = ?', [req.params.id]);
 
   res.json({
     success: true,
@@ -155,15 +448,36 @@ exports.deleteMedicine = asyncHandler(async (req, res) => {
 // @route   GET /api/medicines/alerts/low-stock
 // @access  Private (Admin Apotik)
 exports.getLowStockMedicines = asyncHandler(async (req, res) => {
-  const medicines = await Medicine.find({
-    isActive: true,
-    $expr: { $lte: ['$stock', '$minStock'] },
-  }).sort({ stock: 1 });
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE is_active = 1 AND stock <= min_stock
+    ORDER BY stock ASC`
+  );
 
   res.json({
     success: true,
     count: medicines.length,
-    data: medicines,
+    data: medicines.map(mapMedicine),
   });
 });
 
@@ -176,14 +490,38 @@ exports.getExpiringMedicines = asyncHandler(async (req, res) => {
   const futureDate = new Date();
   futureDate.setDate(futureDate.getDate() + Number(days));
 
-  const medicines = await Medicine.find({
-    isActive: true,
-    expiryDate: { $lte: futureDate, $gte: new Date() },
-  }).sort({ expiryDate: 1 });
+  const medicines = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE is_active = 1
+      AND expiry_date IS NOT NULL
+      AND expiry_date BETWEEN CURDATE() AND ?
+    ORDER BY expiry_date ASC`,
+    [futureDate.toISOString().slice(0, 10)]
+  );
 
   res.json({
     success: true,
     count: medicines.length,
-    data: medicines,
+    data: medicines.map(mapMedicine),
   });
 });
