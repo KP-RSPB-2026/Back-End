@@ -10,6 +10,7 @@ const {
   updateProfile,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
+const { USER_ROLES } = require('../config/constants');
 
 // Validation rules
 const registerValidation = [
@@ -19,7 +20,7 @@ const registerValidation = [
     .isLength({ min: 6 })
     .withMessage('Password minimal 6 karakter'),
   body('role')
-    .isIn(['dokter', 'admin_apotik'])
+    .isIn(Object.values(USER_ROLES))
     .withMessage('Role harus dokter atau admin_apotik'),
 ];
 

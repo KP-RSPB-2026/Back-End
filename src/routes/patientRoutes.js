@@ -20,19 +20,19 @@ const patientValidation = [
     .withMessage('Jenis kelamin harus Laki-laki atau Perempuan'),
 ];
 
-// All routes require authentication
-router.use(protect);
+// All routes require dokter role sesuai usecase
+router.use(protect, authorize('dokter'));
 
 // Routes
 router
   .route('/')
   .get(getPatients)
-  .post(authorize('dokter'), patientValidation, validate, createPatient);
+  .post(patientValidation, validate, createPatient);
 
 router
   .route('/:id')
   .get(getPatient)
-  .put(authorize('dokter'), updatePatient)
-  .delete(authorize('dokter'), deletePatient);
+  .put(updatePatient)
+  .delete(deletePatient);
 
 module.exports = router;

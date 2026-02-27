@@ -26,7 +26,7 @@ Backend REST API untuk sistem manajemen apotik yang mendukung manajemen pasien, 
 
 - **Runtime:** Node.js
 - **Framework:** Express.js
-- **Database:** MongoDB dengan Mongoose ODM
+- **Database:** MySQL / MariaDB (XAMPP)
 - **Authentication:** JWT (JSON Web Tokens)
 - **Password Hashing:** bcryptjs
 - **Validation:** express-validator
@@ -47,18 +47,15 @@ Back-End/
 │   ├── auth.js              # Autentikasi & Autorisasi
 │   ├── errorHandler.js      # Error Handling
 │   └── validator.js         # Validasi Input
-├── models/
-│   ├── User.js              # Model User (Dokter & Admin)
-│   ├── Patient.js           # Model Pasien
-│   ├── Medicine.js          # Model Obat
-│   ├── Prescription.js      # Model Resep
-│   └── MedicineTransfer.js  # Model Transfer Obat
+├── scripts/
+│   └── initDb.js            # Inisialisasi schema MySQL
 ├── routes/
 │   ├── authRoutes.js
 │   ├── patientRoutes.js
 │   ├── medicineRoutes.js
 │   ├── prescriptionRoutes.js
 │   └── transferRoutes.js
+├── seed.mysql.js
 ├── .env.example
 ├── .gitignore
 ├── package.json
@@ -89,7 +86,12 @@ PORT=5000
 NODE_ENV=development
 
 # Database
-MONGODB_URI=mongodb://localhost:27017/apotik_db
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=apotik_db
+DB_CONNECTION_LIMIT=10
 
 # JWT
 JWT_SECRET=your_jwt_secret_key_here
@@ -99,20 +101,23 @@ JWT_EXPIRE=7d
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
 ```
 
-### 3. Install MongoDB
+### 3. Setup MySQL / MariaDB (XAMPP)
 
-Pastikan MongoDB sudah terinstall dan berjalan di komputer Anda.
+Pastikan MySQL/MariaDB di XAMPP sudah berjalan.
 
-**Windows:**
-- Download MongoDB dari https://www.mongodb.com/try/download/community
-- Install dan jalankan MongoDB
+### 4. Inisialisasi Schema Database
 
-**Atau gunakan MongoDB Atlas (Cloud):**
-- Daftar di https://www.mongodb.com/cloud/atlas
-- Buat cluster gratis
-- Dapatkan connection string dan masukkan ke `MONGODB_URI`
+```bash
+npm run db:init
+```
 
-### 4. Jalankan Server
+### 5. Seed Data Demo (Opsional)
+
+```bash
+npm run seed
+```
+
+### 6. Jalankan Server
 
 **Development Mode (dengan auto-reload):**
 ```bash
@@ -168,7 +173,7 @@ Server akan berjalan di `http://localhost:5000`
 | GET | `/api/prescriptions` | Private | Get semua resep |
 | GET | `/api/prescriptions/:id` | Private | Get detail resep |
 | POST | `/api/prescriptions` | Dokter | Buat resep baru |
-| PATCH | `/api/prescriptions/:id/status` | Admin Apotik | Update status resep |
+| PATCH | `/api/prescriptions/:id/status` | Admin Apotik | Update status resep + simpan data dispensing |
 | DELETE | `/api/prescriptions/:id` | Dokter | Batalkan resep |
 
 ### Transfers (`/api/transfers`)
@@ -298,6 +303,24 @@ Content-Type: application/json
 }
 ```
 
+### 6a. Update Status Resep (dengan data dispensing)
+
+```bash
+PATCH /api/prescriptions/:id/status
+Authorization: Bearer ADMIN_JWT_TOKEN
+Content-Type: application/json
+
+{
+  "status": "selesai",
+  "dispensedTo": "pasien",
+  "dispenseInputPatientName": "Budi Santoso"
+}
+```
+
+Catatan:
+- `dispenseInputPatientName` bersifat opsional, jika kosong akan otomatis memakai nama pasien dari data resep.
+- Response detail resep akan berisi `dispenseInfo` (nama pasien dari resep + nama pasien input saat dispensing).
+
 ### 7. Request Obat ke Apotik Lain
 
 ```bash
@@ -380,9 +403,9 @@ API menggunakan format error response yang konsisten:
 
 ### Tambah Fitur Baru
 
-1. Buat model di folder `models/`
-2. Buat controller di folder `controllers/`
-3. Buat routes di folder `routes/`
+1. Tambahkan/ubah schema di `scripts/initDb.js` (jika perlu tabel/kolom baru)
+2. Buat/ubah controller di folder `controllers/`
+3. Buat/ubah routes di folder `routes/`
 4. Register routes di `server.js`
 
 ### Testing
@@ -424,11 +447,11 @@ location /api {
 
 ## Troubleshooting
 
-### MongoDB Connection Error
+### MySQL Connection Error
 
-- Pastikan MongoDB sudah running
-- Check connection string di `.env`
-- Pastikan firewall tidak memblokir port MongoDB (27017)
+- Pastikan service MySQL/MariaDB di XAMPP sudah running
+- Check `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` di `.env`
+- Pastikan user DB punya akses ke database `apotik_db`
 
 ### Port Already in Use
 

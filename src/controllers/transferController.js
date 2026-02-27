@@ -1,5 +1,42 @@
 const asyncHandler = require('express-async-handler');
 const { pool, query } = require('../config/mysql');
+const { TRANSFER_STATUS, TRANSFER_TYPES } = require('../config/constants');
+const { generateDocumentNumber } = require('../utils/documentNumber');
+const { parsePagination } = require('../utils/pagination');
+
+const REQUEST_TRANSFER_TRANSITIONS = {
+  [TRANSFER_STATUS.PENDING]: [
+    TRANSFER_STATUS.DIPROSES,
+    TRANSFER_STATUS.DITOLAK,
+    TRANSFER_STATUS.DIBATALKAN,
+  ],
+  [TRANSFER_STATUS.DIPROSES]: [
+    TRANSFER_STATUS.DIKIRIM,
+    TRANSFER_STATUS.DITOLAK,
+    TRANSFER_STATUS.DIBATALKAN,
+  ],
+  [TRANSFER_STATUS.DIKIRIM]: [TRANSFER_STATUS.DITERIMA, TRANSFER_STATUS.DITOLAK],
+  [TRANSFER_STATUS.DITERIMA]: [],
+  [TRANSFER_STATUS.DITOLAK]: [],
+  [TRANSFER_STATUS.DIBATALKAN]: [],
+};
+
+const RECEIVE_TRANSFER_TRANSITIONS = {
+  [TRANSFER_STATUS.PENDING]: [
+    TRANSFER_STATUS.DIPROSES,
+    TRANSFER_STATUS.DITERIMA,
+    TRANSFER_STATUS.DITOLAK,
+    TRANSFER_STATUS.DIBATALKAN,
+  ],
+  [TRANSFER_STATUS.DIPROSES]: [
+    TRANSFER_STATUS.DITERIMA,
+    TRANSFER_STATUS.DITOLAK,
+    TRANSFER_STATUS.DIBATALKAN,
+  ],
+  [TRANSFER_STATUS.DITERIMA]: [],
+  [TRANSFER_STATUS.DITOLAK]: [],
+  [TRANSFER_STATUS.DIBATALKAN]: [],
+};
 
 const getTransferItemsMap = async (transferIds) => {
   if (!transferIds.length) return {};
@@ -163,25 +200,18 @@ const fetchTransferById = async (id) => {
 };
 
 const generateTransferNumber = async (conn, type) => {
-  const [countRows] = await conn.execute(
-    'SELECT COUNT(*) AS total FROM medicine_transfers WHERE type = ?',
-    [type]
-  );
-  const count = Number(countRows[0].total) + 1;
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const prefix = type === 'request' ? 'REQ' : 'RCV';
-  return `${prefix}${year}${month}${String(count).padStart(5, '0')}`;
+  return generateDocumentNumber(conn, {
+    sequenceKey: type === TRANSFER_TYPES.REQUEST ? 'transfer_request' : 'transfer_receive',
+    prefix: type === TRANSFER_TYPES.REQUEST ? 'REQ' : 'RCV',
+  });
 };
 
 // @desc    Get all medicine transfers
 // @route   GET /api/transfers
 // @access  Private (Admin Apotik)
 exports.getTransfers = asyncHandler(async (req, res) => {
-  const { type, status, page = 1, limit = 10 } = req.query;
-  const currentPage = Number(page);
-  const rowLimit = Number(limit);
+  const { type, status } = req.query;
+  const { page: currentPage, limit: rowLimit } = parsePagination(req.query);
 
   const filters = [];
   const params = [];
@@ -434,11 +464,26 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
       throw new Error('Transfer tidak ditemukan');
     }
 
+    if (status !== transfer.status) {
+      const transitionMap =
+        transfer.type === TRANSFER_TYPES.RECEIVE
+          ? RECEIVE_TRANSFER_TRANSITIONS
+          : REQUEST_TRANSFER_TRANSITIONS;
+      const allowedNextStatuses = transitionMap[transfer.status] || [];
+
+      if (!allowedNextStatuses.includes(status)) {
+        res.status(400);
+        throw new Error(
+          `Transisi status transfer tidak valid: ${transfer.status} -> ${status}`
+        );
+      }
+    }
+
     // If status is 'diterima' and type is 'receive', add to stock
     if (
-      status === 'diterima' &&
-      transfer.type === 'receive' &&
-      transfer.status !== 'diterima'
+      status === TRANSFER_STATUS.DITERIMA &&
+      transfer.type === TRANSFER_TYPES.RECEIVE &&
+      transfer.status !== TRANSFER_STATUS.DITERIMA
     ) {
       const [items] = await conn.execute(
         `SELECT id, medicine_id AS medicineId, quantity
@@ -467,6 +512,11 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
           receivedQuantities && receivedQuantities[i] !== undefined
             ? Number(receivedQuantities[i])
             : Number(item.quantity);
+
+        if (Number.isNaN(quantityToAdd) || quantityToAdd < 0) {
+          res.status(400);
+          throw new Error('Nilai receivedQuantities harus angka >= 0');
+        }
 
         await conn.execute('UPDATE medicines SET stock = stock + ? WHERE id = ?', [
           quantityToAdd,

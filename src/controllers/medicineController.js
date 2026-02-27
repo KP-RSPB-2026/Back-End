@@ -1,5 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const { query } = require('../config/mysql');
+const { parsePagination } = require('../utils/pagination');
 
 const mapMedicine = (row) => ({
   _id: row._id,
@@ -29,10 +30,8 @@ const mapMedicine = (row) => ({
 // @route   GET /api/medicines
 // @access  Private
 exports.getMedicines = asyncHandler(async (req, res) => {
-  const { search, category, lowStock, page = 1, limit = 10 } = req.query;
-  const currentPage = Number(page);
-  const rowLimit = Number(limit);
-  const offset = (currentPage - 1) * rowLimit;
+  const { search, category, lowStock } = req.query;
+  const { page: currentPage, limit: rowLimit, offset } = parsePagination(req.query);
 
   const params = [];
   let whereClause = 'WHERE is_active = 1';
@@ -332,7 +331,7 @@ exports.updateMedicine = asyncHandler(async (req, res) => {
 // @route   PATCH /api/medicines/:id/stock
 // @access  Private (Admin Apotik)
 exports.updateStock = asyncHandler(async (req, res) => {
-  const { quantity, operation } = req.body; // operation: 'add' or 'subtract'
+  const { quantity, operation } = req.body; // operation: 'add' | 'subtract' | 'set'
 
   const medicines = await query(
     `SELECT
@@ -378,6 +377,8 @@ exports.updateStock = asyncHandler(async (req, res) => {
       throw new Error('Stok tidak mencukupi');
     }
     updatedStock -= Number(quantity);
+  } else if (operation === 'set') {
+    updatedStock = Number(quantity);
   } else {
     res.status(400);
     throw new Error('Operasi tidak valid');
@@ -420,6 +421,55 @@ exports.updateStock = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: mapMedicine(updatedMedicine),
+  });
+});
+
+// @desc    Clear medicine stock to zero
+// @route   DELETE /api/medicines/:id/stock
+// @access  Private (Admin Apotik)
+exports.clearStock = asyncHandler(async (req, res) => {
+  const medicines = await query('SELECT id FROM medicines WHERE id = ? LIMIT 1', [
+    req.params.id,
+  ]);
+
+  if (medicines.length === 0) {
+    res.status(404);
+    throw new Error('Obat tidak ditemukan');
+  }
+
+  await query('UPDATE medicines SET stock = 0 WHERE id = ?', [req.params.id]);
+
+  const updatedRows = await query(
+    `SELECT
+      id AS _id,
+      code,
+      name,
+      generic_name AS genericName,
+      category,
+      manufacturer,
+      description,
+      dosage,
+      unit,
+      stock,
+      min_stock AS minStock,
+      price,
+      expiry_date AS expiryDate,
+      batch_number AS batchNumber,
+      is_active AS isActive,
+      side_effects AS sideEffects,
+      contraindications,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM medicines
+    WHERE id = ?
+    LIMIT 1`,
+    [req.params.id]
+  );
+
+  res.json({
+    success: true,
+    message: 'Stok obat berhasil dihapus (diset ke 0)',
+    data: mapMedicine(updatedRows[0]),
   });
 });
 

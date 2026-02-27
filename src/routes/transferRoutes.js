@@ -11,6 +11,7 @@ const {
   cancelTransfer,
 } = require('../controllers/transferController');
 const { protect, authorize } = require('../middleware/auth');
+const { TRANSFER_STATUS } = require('../config/constants');
 
 // Validation rules
 const transferValidation = [
@@ -35,7 +36,7 @@ const receiveValidation = [
 
 const statusValidation = [
   body('status')
-    .isIn(['pending', 'diproses', 'dikirim', 'diterima', 'ditolak', 'dibatalkan'])
+    .isIn(Object.values(TRANSFER_STATUS))
     .withMessage('Status tidak valid'),
 ];
 

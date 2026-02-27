@@ -10,6 +10,7 @@ const {
   cancelPrescription,
 } = require('../controllers/prescriptionController');
 const { protect, authorize } = require('../middleware/auth');
+const { PRESCRIPTION_STATUS } = require('../config/constants');
 
 // Validation rules
 const prescriptionValidation = [
@@ -28,8 +29,17 @@ const prescriptionValidation = [
 
 const statusValidation = [
   body('status')
-    .isIn(['pending', 'disiapkan', 'selesai', 'dibatalkan'])
+    .isIn(Object.values(PRESCRIPTION_STATUS))
     .withMessage('Status tidak valid'),
+  body('dispensedTo')
+    .optional()
+    .isIn(['pasien', 'dokter'])
+    .withMessage('dispensedTo harus pasien atau dokter'),
+  body('dispenseInputPatientName')
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 150 })
+    .withMessage('dispenseInputPatientName harus 1-150 karakter'),
 ];
 
 // All routes require authentication

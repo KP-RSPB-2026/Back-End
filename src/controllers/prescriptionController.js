@@ -1,5 +1,22 @@
 const asyncHandler = require('express-async-handler');
 const { pool, query } = require('../config/mysql');
+const { PRESCRIPTION_STATUS } = require('../config/constants');
+const { generateDocumentNumber } = require('../utils/documentNumber');
+const { parsePagination } = require('../utils/pagination');
+
+const ALLOWED_PRESCRIPTION_TRANSITIONS = {
+  [PRESCRIPTION_STATUS.PENDING]: [
+    PRESCRIPTION_STATUS.DISIAPKAN,
+    PRESCRIPTION_STATUS.SELESAI,
+    PRESCRIPTION_STATUS.DIBATALKAN,
+  ],
+  [PRESCRIPTION_STATUS.DISIAPKAN]: [
+    PRESCRIPTION_STATUS.SELESAI,
+    PRESCRIPTION_STATUS.DIBATALKAN,
+  ],
+  [PRESCRIPTION_STATUS.SELESAI]: [],
+  [PRESCRIPTION_STATUS.DIBATALKAN]: [],
+};
 
 const getPrescriptionItemsMap = async (prescriptionIds) => {
   if (!prescriptionIds.length) return {};
@@ -86,6 +103,21 @@ const mapPrescriptionRow = (row, itemsMap) => ({
         email: row.completedByEmail,
       }
     : null,
+  dispenseInfo: row.dispensedAt
+    ? {
+        inputPatientName: row.dispensedInputPatientName,
+        prescribedPatientName: row.dispensedPrescribedPatientName,
+        dispensedTo: row.dispensedTo,
+        dispensedAt: row.dispensedAt,
+        dispensedBy: row.dispensedById
+          ? {
+              _id: row.dispensedById,
+              name: row.dispensedByName,
+              email: row.dispensedByEmail,
+            }
+          : null,
+      }
+    : null,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -119,11 +151,25 @@ const fetchPrescriptions = async ({ whereClause = '', params = [], pagination })
       d.specialization AS doctorSpecialization,
       d.license_number AS doctorLicenseNumber,
       cb.name AS completedByName,
-      cb.email AS completedByEmail
+      cb.email AS completedByEmail,
+      pd.input_patient_name AS dispensedInputPatientName,
+      pd.prescribed_patient_name AS dispensedPrescribedPatientName,
+      pd.dispensed_to AS dispensedTo,
+      pd.dispensed_at AS dispensedAt,
+      pd.dispensed_by AS dispensedById,
+      du.name AS dispensedByName,
+      du.email AS dispensedByEmail
     FROM prescriptions p
     LEFT JOIN patients pt ON pt.id = p.patient_id
     LEFT JOIN users d ON d.id = p.doctor_id
     LEFT JOIN users cb ON cb.id = p.completed_by
+    LEFT JOIN (
+      SELECT prescription_id, MAX(id) AS latest_dispense_id
+      FROM prescription_dispenses
+      GROUP BY prescription_id
+    ) pdl ON pdl.prescription_id = p.id
+    LEFT JOIN prescription_dispenses pd ON pd.id = pdl.latest_dispense_id
+    LEFT JOIN users du ON du.id = pd.dispensed_by
     ${whereClause}
     ORDER BY p.created_at DESC
     LIMIT ? OFFSET ?`,
@@ -171,11 +217,25 @@ const fetchPrescriptionById = async (id) => {
       d.specialization AS doctorSpecialization,
       d.license_number AS doctorLicenseNumber,
       cb.name AS completedByName,
-      cb.email AS completedByEmail
+      cb.email AS completedByEmail,
+      pd.input_patient_name AS dispensedInputPatientName,
+      pd.prescribed_patient_name AS dispensedPrescribedPatientName,
+      pd.dispensed_to AS dispensedTo,
+      pd.dispensed_at AS dispensedAt,
+      pd.dispensed_by AS dispensedById,
+      du.name AS dispensedByName,
+      du.email AS dispensedByEmail
     FROM prescriptions p
     LEFT JOIN patients pt ON pt.id = p.patient_id
     LEFT JOIN users d ON d.id = p.doctor_id
     LEFT JOIN users cb ON cb.id = p.completed_by
+    LEFT JOIN (
+      SELECT prescription_id, MAX(id) AS latest_dispense_id
+      FROM prescription_dispenses
+      GROUP BY prescription_id
+    ) pdl ON pdl.prescription_id = p.id
+    LEFT JOIN prescription_dispenses pd ON pd.id = pdl.latest_dispense_id
+    LEFT JOIN users du ON du.id = pd.dispensed_by
     WHERE p.id = ?
     LIMIT 1`,
     [id]
@@ -190,21 +250,18 @@ const fetchPrescriptionById = async (id) => {
 };
 
 const generatePrescriptionNumber = async (conn) => {
-  const [countRows] = await conn.execute('SELECT COUNT(*) AS total FROM prescriptions');
-  const count = Number(countRows[0].total) + 1;
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  return `RX${year}${month}${String(count).padStart(5, '0')}`;
+  return generateDocumentNumber(conn, {
+    sequenceKey: 'prescription',
+    prefix: 'RX',
+  });
 };
 
 // @desc    Get all prescriptions
 // @route   GET /api/prescriptions
 // @access  Private
 exports.getPrescriptions = asyncHandler(async (req, res) => {
-  const { status, doctorId, patientId, page = 1, limit = 10 } = req.query;
-  const currentPage = Number(page);
-  const rowLimit = Number(limit);
+  const { status, doctorId, patientId } = req.query;
+  const { page: currentPage, limit: rowLimit } = parsePagination(req.query);
 
   const filters = [];
   const params = [];
@@ -385,7 +442,7 @@ exports.createPrescription = asyncHandler(async (req, res) => {
 // @route   PATCH /api/prescriptions/:id/status
 // @access  Private (Admin Apotik)
 exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
-  const { status } = req.body;
+  const { status, dispensedTo, dispenseInputPatientName } = req.body;
   const conn = await pool.getConnection();
 
   let prescription;
@@ -409,8 +466,23 @@ exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
       throw new Error('Resep tidak ditemukan');
     }
 
+    if (status !== prescription.status) {
+      const allowedNextStatuses =
+        ALLOWED_PRESCRIPTION_TRANSITIONS[prescription.status] || [];
+
+      if (!allowedNextStatuses.includes(status)) {
+        res.status(400);
+        throw new Error(
+          `Transisi status resep tidak valid: ${prescription.status} -> ${status}`
+        );
+      }
+    }
+
     // If status is 'selesai', reduce medicine stock
-    if (status === 'selesai' && prescription.status !== 'selesai') {
+    if (
+      status === PRESCRIPTION_STATUS.SELESAI &&
+      prescription.status !== PRESCRIPTION_STATUS.SELESAI
+    ) {
       const [items] = await conn.execute(
         `SELECT
           pi.medicine_id AS medicineId,
@@ -441,6 +513,34 @@ exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
          SET status = ?, completed_date = NOW(), completed_by = ?
          WHERE id = ?`,
         [status, req.user._id, req.params.id]
+      );
+
+      const [prescriptionPatientRows] = await conn.execute(
+        `SELECT pt.name AS patientName
+         FROM prescriptions p
+         JOIN patients pt ON pt.id = p.patient_id
+         WHERE p.id = ?
+         LIMIT 1`,
+        [req.params.id]
+      );
+
+      const prescribedPatientName = prescriptionPatientRows[0]?.patientName || null;
+      const inputPatientName =
+        dispenseInputPatientName && String(dispenseInputPatientName).trim()
+          ? String(dispenseInputPatientName).trim()
+          : prescribedPatientName;
+
+      await conn.execute(
+        `INSERT INTO prescription_dispenses
+          (prescription_id, prescribed_patient_name, input_patient_name, dispensed_to, dispensed_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          req.params.id,
+          prescribedPatientName,
+          inputPatientName,
+          dispensedTo === 'dokter' ? 'dokter' : 'pasien',
+          req.user._id,
+        ]
       );
     } else {
       await conn.execute('UPDATE prescriptions SET status = ? WHERE id = ?', [

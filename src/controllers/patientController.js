@@ -1,5 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const { query } = require('../config/mysql');
+const { parsePagination } = require('../utils/pagination');
 
 const mapPatient = (row) => ({
   _id: row._id,
@@ -29,10 +30,8 @@ const mapPatient = (row) => ({
 // @route   GET /api/patients
 // @access  Private
 exports.getPatients = asyncHandler(async (req, res) => {
-  const { search, page = 1, limit = 10 } = req.query;
-  const currentPage = Number(page);
-  const rowLimit = Number(limit);
-  const offset = (currentPage - 1) * rowLimit;
+  const { search } = req.query;
+  const { page: currentPage, limit: rowLimit, offset } = parsePagination(req.query);
 
   const params = [];
   let whereClause = 'WHERE p.is_active = 1';

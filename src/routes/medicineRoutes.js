@@ -8,6 +8,7 @@ const {
   createMedicine,
   updateMedicine,
   updateStock,
+  clearStock,
   deleteMedicine,
   getLowStockMedicines,
   getExpiringMedicines,
@@ -32,11 +33,11 @@ const stockValidation = [
   body('quantity')
     .isNumeric()
     .withMessage('Jumlah harus berupa angka')
-    .custom((value) => value > 0)
-    .withMessage('Jumlah harus lebih dari 0'),
+    .custom((value) => value >= 0)
+    .withMessage('Jumlah tidak boleh negatif'),
   body('operation')
-    .isIn(['add', 'subtract'])
-    .withMessage('Operasi harus add atau subtract'),
+    .isIn(['add', 'subtract', 'set'])
+    .withMessage('Operasi harus add, subtract, atau set'),
 ];
 
 // All routes require authentication
@@ -60,6 +61,7 @@ router
 
 router
   .route('/:id/stock')
-  .patch(authorize('admin_apotik'), stockValidation, validate, updateStock);
+  .patch(authorize('admin_apotik'), stockValidation, validate, updateStock)
+  .delete(authorize('admin_apotik'), clearStock);
 
 module.exports = router;
