@@ -88,6 +88,7 @@ exports.login = asyncHandler(async (req, res) => {
       name,
       email,
       role,
+      pharmacy_code AS pharmacyCode,
       password,
       is_active AS isActive
     FROM users
@@ -118,6 +119,7 @@ exports.login = asyncHandler(async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      pharmacyCode: user.pharmacyCode,
       token: generateToken(user._id),
     },
   });
@@ -133,6 +135,7 @@ exports.getMe = asyncHandler(async (req, res) => {
       name,
       email,
       role,
+      pharmacy_code AS pharmacyCode,
       phone_number AS phoneNumber,
       specialization,
       license_number AS licenseNumber,

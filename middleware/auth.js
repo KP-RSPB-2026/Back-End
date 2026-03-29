@@ -24,6 +24,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
           name,
           email,
           role,
+          pharmacy_code AS pharmacyCode,
           phone_number AS phoneNumber,
           specialization,
           license_number AS licenseNumber,

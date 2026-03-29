@@ -10,6 +10,7 @@ const initSchema = async (conn) => {
       email VARCHAR(150) NOT NULL UNIQUE,
       password VARCHAR(255) NOT NULL,
       role ENUM('dokter', 'admin_apotik') NOT NULL,
+      pharmacy_code VARCHAR(50),
       phone_number VARCHAR(30),
       specialization VARCHAR(120),
       license_number VARCHAR(120),
@@ -57,11 +58,13 @@ const initSchema = async (conn) => {
       price DECIMAL(12,2) NOT NULL,
       expiry_date DATE,
       batch_number VARCHAR(80),
+      pharmacy_code VARCHAR(50),
       is_active TINYINT(1) NOT NULL DEFAULT 1,
       side_effects JSON,
       contraindications JSON,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_medicines_pharmacy (pharmacy_code)
     ) ENGINE=InnoDB;
   `);
 
@@ -172,6 +175,17 @@ const seedData = async () => {
     await conn.beginTransaction();
     await initSchema(conn);
 
+    // Ensure new columns exist for upgraded databases
+    await conn.execute(
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS pharmacy_code VARCHAR(50) AFTER role'
+    );
+    await conn.execute(
+      'ALTER TABLE medicines ADD COLUMN IF NOT EXISTS pharmacy_code VARCHAR(50) AFTER batch_number'
+    );
+    await conn.execute(
+      'ALTER TABLE medicines ADD INDEX IF NOT EXISTS idx_medicines_pharmacy (pharmacy_code)'
+    );
+
     await conn.execute('DELETE FROM medicine_transfer_items');
     await conn.execute('DELETE FROM medicine_transfers');
     await conn.execute('DELETE FROM prescription_items');
@@ -183,16 +197,33 @@ const seedData = async () => {
     const adminPassword = await bcrypt.hash('admin123', 10);
     const dokterPassword = await bcrypt.hash('dokter123', 10);
 
-    await conn.execute(
-      `INSERT INTO users (name, email, password, role, phone_number)
-       VALUES (?, ?, ?, ?, ?)`,
-      ['Admin Apotik', 'admin@apotik.com', adminPassword, 'admin_apotik', '081234567890']
-    );
+    const pharmacies = [
+      { code: 'APTA', name: 'Apotek A' },
+      { code: 'APTB', name: 'Apotek B' },
+      { code: 'APTC', name: 'Apotek C' },
+    ];
+
+    for (const [index, pharmacy] of pharmacies.entries()) {
+      await conn.execute(
+        `INSERT INTO users (name, email, password, role, pharmacy_code, phone_number)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        ,
+        [
+          `Admin ${pharmacy.name}`,
+          `admin${index + 1}@apotik.com`,
+          adminPassword,
+          'admin_apotik',
+          pharmacy.code,
+          `0812345678${90 + index}`,
+        ]
+      );
+    }
 
     const [dokterResult] = await conn.execute(
       `INSERT INTO users
        (name, email, password, role, phone_number, specialization, license_number)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ,
       [
         'Dr. Budi Santoso',
         'dokter@apotik.com',
@@ -216,31 +247,34 @@ const seedData = async () => {
       await conn.execute(
         `INSERT INTO patients
          (name, date_of_birth, gender, address, phone_number, email, id_number, allergies, blood_type, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ,
         [...patient, dokterId]
       );
     }
 
-    const medicines = [
+    const baseMedicines = [
       ['MED001', 'Paracetamol 500mg', 'Paracetamol', 'Tablet', 'Kimia Farma', 'Obat penurun panas dan pereda nyeri', '500mg', 'Tablet', 500, 100, 5000, '2025-12-31', 'BATCH-2024-001'],
       ['MED002', 'Amoxicillin 500mg', 'Amoxicillin', 'Kapsul', 'Indofarma', 'Antibiotik untuk infeksi bakteri', '500mg', 'Kapsul', 300, 50, 8000, '2025-10-31', 'BATCH-2024-002'],
       ['MED003', 'OBH Sirup', 'Diphenhydramine HCl', 'Sirup', 'Kalbe Farma', 'Obat batuk', '100ml', 'Botol', 150, 30, 15000, '2025-08-31', 'BATCH-2024-003'],
       ['MED004', 'Vitamin C 1000mg', 'Ascorbic Acid', 'Tablet', 'Kalbe Farma', 'Suplemen vitamin C', '1000mg', 'Tablet', 200, 50, 3000, '2026-12-31', 'BATCH-2024-004'],
       ['MED005', 'Salep 88', 'Miconazole', 'Salep', 'Konimex', 'Obat untuk penyakit kulit', '10g', 'Tube', 80, 20, 12000, '2025-06-30', 'BATCH-2024-005'],
-      ['MED006', 'Antasida Doen', 'Aluminium Hydroxide', 'Tablet', 'Pyridam Farma', 'Obat untuk sakit maag', '500mg', 'Tablet', 250, 50, 4000, '2025-09-30', 'BATCH-2024-006'],
-      ['MED007', 'Decolgen', 'Paracetamol + Phenylpropanolamine', 'Tablet', 'Konimex', 'Obat flu dan demam', '500mg', 'Tablet', 180, 40, 6000, '2025-11-30', 'BATCH-2024-007'],
-      ['MED008', 'Ibuprofen 400mg', 'Ibuprofen', 'Tablet', 'Tempo Scan Pacific', 'Anti-inflamasi dan pereda nyeri', '400mg', 'Tablet', 120, 30, 7000, '2025-07-31', 'BATCH-2024-008'],
     ];
 
-    for (const medicine of medicines) {
-      await conn.execute(
-        `INSERT INTO medicines
-         (
-           code, name, generic_name, category, manufacturer, description, dosage,
-           unit, stock, min_stock, price, expiry_date, batch_number, side_effects, contraindications
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [...medicine, JSON.stringify([]), JSON.stringify([])]
-      );
+    for (const pharmacy of pharmacies) {
+      for (const medicine of baseMedicines) {
+        const [baseCode, ...rest] = medicine;
+        const codeWithPharmacy = `${baseCode}-${pharmacy.code}`;
+        await conn.execute(
+          `INSERT INTO medicines
+           (
+             code, name, generic_name, category, manufacturer, description, dosage,
+             unit, stock, min_stock, price, expiry_date, batch_number, pharmacy_code, side_effects, contraindications
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ,
+          [codeWithPharmacy, ...rest, pharmacy.code, JSON.stringify([]), JSON.stringify([])]
+        );
+      }
     }
 
     await conn.commit();

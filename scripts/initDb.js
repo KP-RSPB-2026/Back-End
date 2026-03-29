@@ -8,6 +8,7 @@ const schemaStatements = [
     email VARCHAR(150) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role ENUM('dokter', 'admin_apotik') NOT NULL,
+    pharmacy_code VARCHAR(50),
     phone_number VARCHAR(30),
     specialization VARCHAR(120),
     license_number VARCHAR(120),
@@ -49,11 +50,13 @@ const schemaStatements = [
     price DECIMAL(12,2) NOT NULL,
     expiry_date DATE,
     batch_number VARCHAR(80),
+    pharmacy_code VARCHAR(50),
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     side_effects JSON,
     contraindications JSON,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_medicines_pharmacy (pharmacy_code)
   ) ENGINE=InnoDB;`,
   `CREATE TABLE IF NOT EXISTS prescriptions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -152,6 +155,17 @@ const schemaStatements = [
     for (const statement of schemaStatements) {
       await conn.execute(statement);
     }
+
+    // Ensure new columns exist when upgrading existing DBs
+    await conn.execute(
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS pharmacy_code VARCHAR(50) AFTER role'
+    );
+    await conn.execute(
+      'ALTER TABLE medicines ADD COLUMN IF NOT EXISTS pharmacy_code VARCHAR(50) AFTER batch_number'
+    );
+    await conn.execute(
+      'ALTER TABLE medicines ADD INDEX IF NOT EXISTS idx_medicines_pharmacy (pharmacy_code)'
+    );
 
     await conn.end();
     console.log('Database schema initialized successfully.');

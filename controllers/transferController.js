@@ -78,8 +78,39 @@ const mapTransferRow = (row, itemsMap) => ({
   updatedAt: row.updatedAt,
 });
 
-const fetchTransfers = async ({ whereClause = '', params = [], page, limit }) => {
+// @desc    List registered pharmacies (distinct pharmacy_code from users)
+// @route   GET /api/transfers/pharmacies
+// @access  Private (Admin Apotik)
+exports.listPharmacies = asyncHandler(async (req, res) => {
+  const rows = await query(
+    `SELECT DISTINCT pharmacy_code AS code
+     FROM users
+     WHERE pharmacy_code IS NOT NULL
+     ORDER BY pharmacy_code ASC`
+  );
+
+  res.json({
+    success: true,
+    data: rows.filter((r) => r.code),
+  });
+});
+
+const fetchTransfers = async ({ whereClause = '', params = [], page, limit, pharmacyCode }) => {
   const offset = (page - 1) * limit;
+
+  const filters = [];
+  const filterParams = [];
+
+  if (pharmacyCode) {
+    filters.push('(t.from_pharmacy = ? OR t.to_pharmacy = ?)');
+    filterParams.push(pharmacyCode, pharmacyCode);
+  }
+
+  if (whereClause) {
+    filters.push(whereClause.replace(/^WHERE\s+/i, ''));
+  }
+
+  const finalWhere = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
   const transfers = await query(
     `SELECT
@@ -104,17 +135,17 @@ const fetchTransfers = async ({ whereClause = '', params = [], page, limit }) =>
     FROM medicine_transfers t
     LEFT JOIN users rb ON rb.id = t.requested_by
     LEFT JOIN users pb ON pb.id = t.processed_by
-    ${whereClause}
+    ${finalWhere}
     ORDER BY t.created_at DESC
     LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    [...filterParams, ...params, limit, offset]
   );
 
   const countResult = await query(
     `SELECT COUNT(*) AS total
      FROM medicine_transfers t
-     ${whereClause}`,
-    params
+     ${finalWhere}`,
+    [...filterParams, ...params]
   );
 
   const itemsMap = await getTransferItemsMap(transfers.map((row) => row._id));
@@ -125,7 +156,7 @@ const fetchTransfers = async ({ whereClause = '', params = [], page, limit }) =>
   };
 };
 
-const fetchTransferById = async (id) => {
+const fetchTransferById = async (id, pharmacyCode) => {
   const rows = await query(
     `SELECT
       t.id AS _id,
@@ -158,6 +189,14 @@ const fetchTransferById = async (id) => {
     return null;
   }
 
+  if (
+    pharmacyCode &&
+    rows[0].fromPharmacy !== pharmacyCode &&
+    rows[0].toPharmacy !== pharmacyCode
+  ) {
+    return null;
+  }
+
   const itemsMap = await getTransferItemsMap([rows[0]._id]);
   return mapTransferRow(rows[0], itemsMap);
 };
@@ -183,6 +222,11 @@ exports.getTransfers = asyncHandler(async (req, res) => {
   const currentPage = Number(page);
   const rowLimit = Number(limit);
 
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
+
   const filters = [];
   const params = [];
 
@@ -196,10 +240,10 @@ exports.getTransfers = asyncHandler(async (req, res) => {
     params.push(status);
   }
 
-  const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const { transfers, count } = await fetchTransfers({
-    whereClause,
+    whereClause: filters.join(' AND '),
     params,
+    pharmacyCode: req.user.pharmacyCode,
     page: currentPage,
     limit: rowLimit,
   });
@@ -219,7 +263,12 @@ exports.getTransfers = asyncHandler(async (req, res) => {
 // @route   GET /api/transfers/:id
 // @access  Private (Admin Apotik)
 exports.getTransfer = asyncHandler(async (req, res) => {
-  const transfer = await fetchTransferById(req.params.id);
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
+
+  const transfer = await fetchTransferById(req.params.id, req.user.pharmacyCode);
 
   if (!transfer) {
     res.status(404);
@@ -237,6 +286,11 @@ exports.getTransfer = asyncHandler(async (req, res) => {
 // @access  Private (Admin Apotik)
 exports.createRequest = asyncHandler(async (req, res) => {
   const { toPharmacy, medicines, notes, urgency } = req.body;
+
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
 
   // Verify medicines exist
   const medicineIds = medicines.map((item) => item.medicine);
@@ -277,7 +331,7 @@ exports.createRequest = asyncHandler(async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         transferNumber,
-        'Apotik Pusat',
+        req.user.pharmacyCode,
         toPharmacy,
         'request',
         notes || null,
@@ -311,7 +365,7 @@ exports.createRequest = asyncHandler(async (req, res) => {
     conn.release();
   }
 
-  const populatedTransfer = await fetchTransferById(transferId);
+  const populatedTransfer = await fetchTransferById(transferId, req.user.pharmacyCode);
 
   res.status(201).json({
     success: true,
@@ -324,6 +378,11 @@ exports.createRequest = asyncHandler(async (req, res) => {
 // @access  Private (Admin Apotik)
 exports.createReceive = asyncHandler(async (req, res) => {
   const { fromPharmacy, medicines, notes } = req.body;
+
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
 
   // Verify medicines exist
   const medicineIds = medicines.map((item) => item.medicine);
@@ -366,7 +425,7 @@ exports.createReceive = asyncHandler(async (req, res) => {
       [
         transferNumber,
         fromPharmacy,
-        'Apotik Pusat',
+        req.user.pharmacyCode,
         'receive',
         notes || null,
         'pending',
@@ -400,7 +459,7 @@ exports.createReceive = asyncHandler(async (req, res) => {
     conn.release();
   }
 
-  const populatedTransfer = await fetchTransferById(transferId);
+  const populatedTransfer = await fetchTransferById(transferId, req.user.pharmacyCode);
 
   res.status(201).json({
     success: true,
@@ -415,11 +474,16 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
   const { status, receivedQuantities } = req.body;
   const conn = await pool.getConnection();
 
+   if (!req.user?.pharmacyCode) {
+     res.status(400);
+     throw new Error('Akun admin belum memiliki pharmacy_code');
+   }
+
   try {
     await conn.beginTransaction();
 
     const [transferRows] = await conn.execute(
-      `SELECT id, type, status
+      `SELECT id, type, status, from_pharmacy, to_pharmacy
        FROM medicine_transfers
        WHERE id = ?
        LIMIT 1
@@ -432,6 +496,15 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
     if (!transfer) {
       res.status(404);
       throw new Error('Transfer tidak ditemukan');
+    }
+
+    if (
+      req.user?.pharmacyCode &&
+      transfer.from_pharmacy !== req.user.pharmacyCode &&
+      transfer.to_pharmacy !== req.user.pharmacyCode
+    ) {
+      res.status(403);
+      throw new Error('Tidak berhak mengubah transfer dari apotek lain');
     }
 
     // If status is 'diterima' and type is 'receive', add to stock
@@ -502,7 +575,7 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
     conn.release();
   }
 
-  const updatedTransfer = await fetchTransferById(req.params.id);
+  const updatedTransfer = await fetchTransferById(req.params.id, req.user.pharmacyCode);
 
   res.json({
     success: true,
@@ -515,7 +588,7 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
 // @access  Private (Admin Apotik)
 exports.cancelTransfer = asyncHandler(async (req, res) => {
   const rows = await query(
-    `SELECT id, status
+    `SELECT id, status, from_pharmacy, to_pharmacy
      FROM medicine_transfers
      WHERE id = ?
      LIMIT 1`,
@@ -527,6 +600,15 @@ exports.cancelTransfer = asyncHandler(async (req, res) => {
   if (!transfer) {
     res.status(404);
     throw new Error('Transfer tidak ditemukan');
+  }
+
+  if (
+    req.user?.pharmacyCode &&
+    transfer.from_pharmacy !== req.user.pharmacyCode &&
+    transfer.to_pharmacy !== req.user.pharmacyCode
+  ) {
+    res.status(403);
+    throw new Error('Tidak berhak membatalkan transfer dari apotek lain');
   }
 
   // Can only cancel if not yet completed

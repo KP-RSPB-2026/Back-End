@@ -9,6 +9,7 @@ const {
   createReceive,
   updateTransferStatus,
   cancelTransfer,
+  listPharmacies,
 } = require('../controllers/transferController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -43,6 +44,7 @@ const statusValidation = [
 router.use(protect, authorize('admin_apotik'));
 
 // Routes
+router.get('/pharmacies', listPharmacies);
 router.route('/').get(getTransfers);
 
 router.post('/request', requestValidation, validate, createRequest);

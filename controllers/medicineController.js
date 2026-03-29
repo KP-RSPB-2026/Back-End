@@ -37,6 +37,14 @@ exports.getMedicines = asyncHandler(async (req, res) => {
   const params = [];
   let whereClause = 'WHERE is_active = 1';
 
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
+
+  whereClause += ' AND pharmacy_code = ?';
+  params.push(req.user.pharmacyCode);
+
   if (search) {
     whereClause += ' AND (name LIKE ? OR generic_name LIKE ? OR code LIKE ?)';
     const wildcard = `%${search}%`;
@@ -104,6 +112,11 @@ exports.getMedicines = asyncHandler(async (req, res) => {
 // @route   GET /api/medicines/:id
 // @access  Private
 exports.getMedicine = asyncHandler(async (req, res) => {
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
+
   const medicines = await query(
     `SELECT
       id AS _id,
@@ -126,9 +139,9 @@ exports.getMedicine = asyncHandler(async (req, res) => {
       created_at AS createdAt,
       updated_at AS updatedAt
     FROM medicines
-    WHERE id = ?
+    WHERE id = ? AND pharmacy_code = ?
     LIMIT 1`,
-    [req.params.id]
+    [req.params.id, req.user.pharmacyCode]
   );
 
   const medicine = medicines[0];
