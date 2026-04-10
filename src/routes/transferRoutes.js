@@ -9,6 +9,11 @@ const {
   createReceive,
   updateTransferStatus,
   cancelTransfer,
+<<<<<<< Updated upstream:src/routes/transferRoutes.js
+=======
+  listPharmacies,
+  getTransferHistory,
+>>>>>>> Stashed changes:routes/transferRoutes.js
 } = require('../controllers/transferController');
 const { protect, authorize } = require('../middleware/auth');
 const { TRANSFER_STATUS } = require('../config/constants');
@@ -50,6 +55,7 @@ router.post('/request', requestValidation, validate, createRequest);
 router.post('/receive', receiveValidation, validate, createReceive);
 
 router.route('/:id').get(getTransfer);
+router.route('/:id/history').get(getTransferHistory);
 
 router
   .route('/:id/status')

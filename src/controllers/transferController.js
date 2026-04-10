@@ -38,6 +38,198 @@ const RECEIVE_TRANSFER_TRANSITIONS = {
   [TRANSFER_STATUS.DIBATALKAN]: [],
 };
 
+const normalizeCodeForPharmacy = (code, fromPharmacy, toPharmacy) => {
+  if (!code) return null;
+  const fromSuffix = `-${fromPharmacy}`;
+  const baseCode = code.endsWith(fromSuffix)
+    ? code.slice(0, -fromSuffix.length)
+    : code;
+  return `${baseCode}-${toPharmacy}`;
+};
+
+const findMedicineForUpdate = async (conn, params, lock = false) => {
+  const { id, pharmacyCode, code, name, genericName, dosage, unit } = params;
+  const lockClause = lock ? ' FOR UPDATE' : '';
+
+  if (id && pharmacyCode) {
+    const [rows] = await conn.execute(
+      `SELECT * FROM medicines WHERE id = ? AND pharmacy_code = ? LIMIT 1${lockClause}`,
+      [id, pharmacyCode]
+    );
+    if (rows[0]) return rows[0];
+  }
+
+  if (code && pharmacyCode) {
+    const [rows] = await conn.execute(
+      `SELECT * FROM medicines WHERE code = ? AND pharmacy_code = ? LIMIT 1${lockClause}`,
+      [code, pharmacyCode]
+    );
+    if (rows[0]) return rows[0];
+  }
+
+  if (name && pharmacyCode) {
+    const [rows] = await conn.execute(
+      `SELECT *
+       FROM medicines
+       WHERE pharmacy_code = ?
+         AND name = ?
+         AND COALESCE(generic_name, '') = COALESCE(?, '')
+         AND COALESCE(dosage, '') = COALESCE(?, '')
+         AND COALESCE(unit, '') = COALESCE(?, '')
+       LIMIT 1${lockClause}`,
+      [pharmacyCode, name, genericName || null, dosage || null, unit || null]
+    );
+    if (rows[0]) return rows[0];
+  }
+
+  return null;
+};
+
+const createDestinationMedicine = async (conn, sourceMedicine, toPharmacy) => {
+  const baseCode = normalizeCodeForPharmacy(
+    sourceMedicine.code,
+    sourceMedicine.pharmacy_code,
+    toPharmacy
+  );
+
+  let candidateCode = baseCode || `${sourceMedicine.code}-${toPharmacy}`;
+  let suffix = 1;
+
+  while (true) {
+    const [existingCode] = await conn.execute(
+      'SELECT id FROM medicines WHERE code = ? LIMIT 1',
+      [candidateCode]
+    );
+    if (!existingCode[0]) break;
+    candidateCode = `${baseCode || sourceMedicine.code}-${toPharmacy}-${suffix}`;
+    suffix += 1;
+  }
+
+  const [insertResult] = await conn.execute(
+    `INSERT INTO medicines
+      (
+        code,
+        name,
+        generic_name,
+        category,
+        manufacturer,
+        description,
+        dosage,
+        unit,
+        stock,
+        min_stock,
+        price,
+        expiry_date,
+        batch_number,
+        pharmacy_code,
+        is_active,
+        side_effects,
+        contraindications
+      )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      candidateCode,
+      sourceMedicine.name,
+      sourceMedicine.generic_name,
+      sourceMedicine.category,
+      sourceMedicine.manufacturer,
+      sourceMedicine.description,
+      sourceMedicine.dosage,
+      sourceMedicine.unit,
+      0,
+      sourceMedicine.min_stock,
+      sourceMedicine.price,
+      sourceMedicine.expiry_date,
+      sourceMedicine.batch_number,
+      toPharmacy,
+      sourceMedicine.is_active,
+      sourceMedicine.side_effects,
+      sourceMedicine.contraindications,
+    ]
+  );
+
+  const [rows] = await conn.execute(
+    'SELECT * FROM medicines WHERE id = ? LIMIT 1 FOR UPDATE',
+    [insertResult.insertId]
+  );
+
+  return rows[0];
+};
+
+const resolveApprovedQuantity = (receivedQuantities, index, item) => {
+  if (Array.isArray(receivedQuantities) && receivedQuantities[index] !== undefined) {
+    return Number(receivedQuantities[index]);
+  }
+
+  if (
+    receivedQuantities &&
+    typeof receivedQuantities === 'object' &&
+    receivedQuantities[item.id] !== undefined
+  ) {
+    return Number(receivedQuantities[item.id]);
+  }
+
+  return Number(item.quantity);
+};
+
+let transferHistoryTableEnsured = false;
+
+const ensureTransferHistoryTable = async (conn) => {
+  if (transferHistoryTableEnsured) return;
+
+  await conn.execute(`
+    CREATE TABLE IF NOT EXISTS medicine_transfer_history (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      transfer_id INT NOT NULL,
+      action VARCHAR(40) NOT NULL,
+      from_status VARCHAR(40),
+      to_status VARCHAR(40),
+      actor_id INT,
+      actor_pharmacy_code VARCHAR(50),
+      notes TEXT,
+      metadata JSON,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_transfer_history_transfer FOREIGN KEY (transfer_id) REFERENCES medicine_transfers(id)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT fk_transfer_history_actor FOREIGN KEY (actor_id) REFERENCES users(id)
+        ON DELETE SET NULL ON UPDATE CASCADE,
+      INDEX idx_transfer_history_transfer (transfer_id),
+      INDEX idx_transfer_history_created (created_at)
+    ) ENGINE=InnoDB;
+  `);
+
+  transferHistoryTableEnsured = true;
+};
+
+const appendTransferHistory = async (conn, payload) => {
+  await ensureTransferHistoryTable(conn);
+
+  await conn.execute(
+    `INSERT INTO medicine_transfer_history
+      (
+        transfer_id,
+        action,
+        from_status,
+        to_status,
+        actor_id,
+        actor_pharmacy_code,
+        notes,
+        metadata
+      )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      payload.transferId,
+      payload.action,
+      payload.fromStatus || null,
+      payload.toStatus || null,
+      payload.actorId || null,
+      payload.actorPharmacyCode || null,
+      payload.notes || null,
+      JSON.stringify(payload.metadata || {}),
+    ]
+  );
+};
+
 const getTransferItemsMap = async (transferIds) => {
   if (!transferIds.length) return {};
 
@@ -262,6 +454,72 @@ exports.getTransfer = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Get transfer history
+// @route   GET /api/transfers/:id/history
+// @access  Private (Admin Apotik)
+exports.getTransferHistory = asyncHandler(async (req, res) => {
+  if (!req.user?.pharmacyCode) {
+    res.status(400);
+    throw new Error('Akun admin belum memiliki pharmacy_code');
+  }
+
+  const transfer = await fetchTransferById(req.params.id, req.user.pharmacyCode);
+
+  if (!transfer) {
+    res.status(404);
+    throw new Error('Transfer tidak ditemukan');
+  }
+
+  const conn = await pool.getConnection();
+
+  try {
+    await ensureTransferHistoryTable(conn);
+
+    const [rows] = await conn.execute(
+      `SELECT
+         h.id,
+         h.action,
+         h.from_status AS fromStatus,
+         h.to_status AS toStatus,
+         h.actor_id AS actorId,
+         h.actor_pharmacy_code AS actorPharmacyCode,
+         h.notes,
+         h.metadata,
+         h.created_at AS createdAt,
+         u.name AS actorName,
+         u.email AS actorEmail
+       FROM medicine_transfer_history h
+       LEFT JOIN users u ON u.id = h.actor_id
+       WHERE h.transfer_id = ?
+       ORDER BY h.id ASC`,
+      [req.params.id]
+    );
+
+    res.json({
+      success: true,
+      data: rows.map((row) => ({
+        id: row.id,
+        action: row.action,
+        fromStatus: row.fromStatus,
+        toStatus: row.toStatus,
+        actor: row.actorId
+          ? {
+              id: row.actorId,
+              name: row.actorName,
+              email: row.actorEmail,
+              pharmacyCode: row.actorPharmacyCode,
+            }
+          : null,
+        notes: row.notes,
+        metadata: row.metadata ? JSON.parse(row.metadata) : {},
+        createdAt: row.createdAt,
+      })),
+    });
+  } finally {
+    conn.release();
+  }
+});
+
 // @desc    Create medicine request to another pharmacy
 // @route   POST /api/transfers/request
 // @access  Private (Admin Apotik)
@@ -332,6 +590,23 @@ exports.createRequest = asyncHandler(async (req, res) => {
         ]
       );
     }
+
+    await appendTransferHistory(conn, {
+      transferId,
+      action: 'created',
+      fromStatus: null,
+      toStatus: 'pending',
+      actorId: req.user._id,
+      actorPharmacyCode: req.user.pharmacyCode,
+      notes: 'Request transfer dibuat',
+      metadata: {
+        type: 'request',
+        medicines: medicines.map((item) => ({
+          medicineId: Number(item.medicine),
+          quantity: Number(item.quantity),
+        })),
+      },
+    });
 
     await conn.commit();
   } catch (error) {
@@ -422,6 +697,23 @@ exports.createReceive = asyncHandler(async (req, res) => {
       );
     }
 
+    await appendTransferHistory(conn, {
+      transferId,
+      action: 'created',
+      fromStatus: null,
+      toStatus: 'pending',
+      actorId: req.user._id,
+      actorPharmacyCode: req.user.pharmacyCode,
+      notes: 'Receive transfer dibuat',
+      metadata: {
+        type: 'receive',
+        medicines: medicines.map((item) => ({
+          medicineId: Number(item.medicine),
+          quantity: Number(item.quantity),
+        })),
+      },
+    });
+
     await conn.commit();
   } catch (error) {
     await conn.rollback();
@@ -479,17 +771,59 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
       }
     }
 
+<<<<<<< Updated upstream:src/controllers/transferController.js
     // If status is 'diterima' and type is 'receive', add to stock
     if (
       status === TRANSFER_STATUS.DITERIMA &&
       transfer.type === TRANSFER_TYPES.RECEIVE &&
       transfer.status !== TRANSFER_STATUS.DITERIMA
     ) {
+=======
+    const previousStatus = transfer.status;
+
+    if (transfer.status === 'diterima' && status !== 'diterima') {
+      res.status(400);
+      throw new Error('Transfer yang sudah diterima tidak dapat diubah statusnya');
+    }
+
+    const [movementRows] = await conn.execute(
+      `SELECT COALESCE(SUM(received_quantity), 0) AS movedQty
+       FROM medicine_transfer_items
+       WHERE transfer_id = ?`,
+      [req.params.id]
+    );
+
+    const alreadyMoved = Number(movementRows[0]?.movedQty || 0) > 0;
+    const isApprovalStatus = status === 'diproses' || status === 'diterima';
+    const shouldMoveStock =
+      isApprovalStatus && transfer.status !== 'diterima' && !alreadyMoved;
+
+    // On approval (diproses/diterima), move stock automatically from supplier
+    // pharmacy (to_pharmacy) to requester pharmacy (from_pharmacy).
+    if (shouldMoveStock) {
+      if (transfer.to_pharmacy !== req.user.pharmacyCode) {
+        res.status(403);
+        throw new Error('Hanya apotek tujuan request yang dapat menyetujui transfer');
+      }
+
+      const sourcePharmacy = transfer.to_pharmacy;
+      const destinationPharmacy = transfer.from_pharmacy;
+
+>>>>>>> Stashed changes:controllers/transferController.js
       const [items] = await conn.execute(
-        `SELECT id, medicine_id AS medicineId, quantity
-         FROM medicine_transfer_items
-         WHERE transfer_id = ?
-         ORDER BY id ASC
+        `SELECT
+           ti.id,
+           ti.medicine_id AS medicineId,
+           ti.quantity,
+           m.code AS medicineCode,
+           m.name AS medicineName,
+           m.generic_name AS medicineGenericName,
+           m.dosage AS medicineDosage,
+           m.unit AS medicineUnit
+         FROM medicine_transfer_items ti
+         LEFT JOIN medicines m ON m.id = ti.medicine_id
+         WHERE ti.transfer_id = ?
+         ORDER BY ti.id ASC
          FOR UPDATE`,
         [req.params.id]
       );
@@ -497,21 +831,80 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
 
-        const [medicineRows] = await conn.execute(
-          'SELECT id FROM medicines WHERE id = ? LIMIT 1 FOR UPDATE',
-          [item.medicineId]
-        );
+        const quantityToMove = resolveApprovedQuantity(receivedQuantities, i, item);
 
-        if (!medicineRows[0]) {
-          res.status(404);
-          throw new Error('Obat tidak ditemukan');
+        if (!Number.isFinite(quantityToMove) || quantityToMove <= 0) {
+          res.status(400);
+          throw new Error('Jumlah obat yang disetujui harus lebih dari 0');
         }
 
-        // Use received quantity if provided, otherwise use requested quantity
-        const quantityToAdd =
-          receivedQuantities && receivedQuantities[i] !== undefined
-            ? Number(receivedQuantities[i])
-            : Number(item.quantity);
+        if (quantityToMove > Number(item.quantity)) {
+          res.status(400);
+          throw new Error('Jumlah obat yang disetujui tidak boleh melebihi jumlah request');
+        }
+
+        const sourceMedicine = await findMedicineForUpdate(
+          conn,
+          {
+            id: item.medicineId,
+            pharmacyCode: sourcePharmacy,
+            code: normalizeCodeForPharmacy(
+              item.medicineCode,
+              destinationPharmacy,
+              sourcePharmacy
+            ),
+            name: item.medicineName,
+            genericName: item.medicineGenericName,
+            dosage: item.medicineDosage,
+            unit: item.medicineUnit,
+          },
+          true
+        );
+
+        if (!sourceMedicine) {
+          res.status(404);
+          throw new Error(
+            `Obat sumber untuk transfer item ${item.id} tidak ditemukan di apotek asal`
+          );
+        }
+
+        if (Number(sourceMedicine.stock) < quantityToMove) {
+          res.status(400);
+          throw new Error(
+            `Stok obat ${sourceMedicine.name} di apotek asal tidak mencukupi`
+          );
+        }
+
+        let destinationMedicine = await findMedicineForUpdate(
+          conn,
+          {
+            id: item.medicineId,
+            code: normalizeCodeForPharmacy(
+              sourceMedicine.code,
+              sourcePharmacy,
+              destinationPharmacy
+            ),
+            pharmacyCode: destinationPharmacy,
+            name: sourceMedicine.name,
+            genericName: sourceMedicine.generic_name,
+            dosage: sourceMedicine.dosage,
+            unit: sourceMedicine.unit,
+          },
+          true
+        );
+
+        if (!destinationMedicine) {
+          destinationMedicine = await createDestinationMedicine(
+            conn,
+            sourceMedicine,
+            destinationPharmacy
+          );
+        }
+
+        await conn.execute('UPDATE medicines SET stock = stock - ? WHERE id = ?', [
+          quantityToMove,
+          sourceMedicine.id,
+        ]);
 
         if (Number.isNaN(quantityToAdd) || quantityToAdd < 0) {
           res.status(400);
@@ -519,29 +912,55 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
         }
 
         await conn.execute('UPDATE medicines SET stock = stock + ? WHERE id = ?', [
-          quantityToAdd,
-          item.medicineId,
+          quantityToMove,
+          destinationMedicine.id,
         ]);
 
         await conn.execute(
           'UPDATE medicine_transfer_items SET received_quantity = ? WHERE id = ?',
-          [quantityToAdd, item.id]
+          [quantityToMove, item.id]
         );
       }
 
       await conn.execute(
         `UPDATE medicine_transfers
-         SET status = ?, processed_by = ?, completed_date = NOW()
+         SET status = ?, processed_by = ?, completed_date = CASE WHEN ? = 'diterima' THEN NOW() ELSE NULL END
          WHERE id = ?`,
-        [status, req.user._id, req.params.id]
+        [status, req.user._id, status, req.params.id]
       );
+
+      await appendTransferHistory(conn, {
+        transferId: Number(req.params.id),
+        action: 'status_changed',
+        fromStatus: previousStatus,
+        toStatus: status,
+        actorId: req.user._id,
+        actorPharmacyCode: req.user.pharmacyCode,
+        notes: 'Status transfer diperbarui dan stok dipindahkan otomatis',
+        metadata: {
+          autoStockMovement: true,
+        },
+      });
     } else {
       await conn.execute(
         `UPDATE medicine_transfers
-         SET status = ?, processed_by = ?
+         SET status = ?, processed_by = ?, completed_date = CASE WHEN ? = 'diterima' THEN NOW() ELSE completed_date END
          WHERE id = ?`,
-        [status, req.user._id, req.params.id]
+        [status, req.user._id, status, req.params.id]
       );
+
+      await appendTransferHistory(conn, {
+        transferId: Number(req.params.id),
+        action: 'status_changed',
+        fromStatus: previousStatus,
+        toStatus: status,
+        actorId: req.user._id,
+        actorPharmacyCode: req.user.pharmacyCode,
+        notes: 'Status transfer diperbarui',
+        metadata: {
+          autoStockMovement: false,
+        },
+      });
     }
 
     await conn.commit();
@@ -564,6 +983,7 @@ exports.updateTransferStatus = asyncHandler(async (req, res) => {
 // @route   DELETE /api/transfers/:id
 // @access  Private (Admin Apotik)
 exports.cancelTransfer = asyncHandler(async (req, res) => {
+<<<<<<< Updated upstream:src/controllers/transferController.js
   const rows = await query(
     `SELECT id, status
      FROM medicine_transfers
@@ -571,14 +991,69 @@ exports.cancelTransfer = asyncHandler(async (req, res) => {
      LIMIT 1`,
     [req.params.id]
   );
+=======
+  const conn = await pool.getConnection();
+>>>>>>> Stashed changes:controllers/transferController.js
 
-  const transfer = rows[0];
+  try {
+    await conn.beginTransaction();
 
-  if (!transfer) {
-    res.status(404);
-    throw new Error('Transfer tidak ditemukan');
+    const [rows] = await conn.execute(
+      `SELECT id, status, from_pharmacy, to_pharmacy
+       FROM medicine_transfers
+       WHERE id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [req.params.id]
+    );
+
+    const transfer = rows[0];
+
+    if (!transfer) {
+      res.status(404);
+      throw new Error('Transfer tidak ditemukan');
+    }
+
+    if (
+      req.user?.pharmacyCode &&
+      transfer.from_pharmacy !== req.user.pharmacyCode &&
+      transfer.to_pharmacy !== req.user.pharmacyCode
+    ) {
+      res.status(403);
+      throw new Error('Tidak berhak membatalkan transfer dari apotek lain');
+    }
+
+    // Can only cancel if not yet completed
+    if (transfer.status === 'diterima' || transfer.status === 'selesai') {
+      res.status(400);
+      throw new Error('Transfer yang sudah selesai tidak dapat dibatalkan');
+    }
+
+    await conn.execute('UPDATE medicine_transfers SET status = ? WHERE id = ?', [
+      'dibatalkan',
+      req.params.id,
+    ]);
+
+    await appendTransferHistory(conn, {
+      transferId: Number(req.params.id),
+      action: 'cancelled',
+      fromStatus: transfer.status,
+      toStatus: 'dibatalkan',
+      actorId: req.user?._id,
+      actorPharmacyCode: req.user?.pharmacyCode,
+      notes: 'Transfer dibatalkan',
+      metadata: {},
+    });
+
+    await conn.commit();
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
   }
 
+<<<<<<< Updated upstream:src/controllers/transferController.js
   // Can only cancel if not yet completed
   if (transfer.status === 'diterima' || transfer.status === 'selesai') {
     res.status(400);
@@ -590,6 +1065,8 @@ exports.cancelTransfer = asyncHandler(async (req, res) => {
     req.params.id,
   ]);
 
+=======
+>>>>>>> Stashed changes:controllers/transferController.js
   res.json({
     success: true,
     message: 'Transfer berhasil dibatalkan',
