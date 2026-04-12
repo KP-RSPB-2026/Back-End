@@ -4,6 +4,7 @@ const { query } = require('../config/mysql');
 const mapMedicine = (row) => ({
   _id: row._id,
   code: row.code,
+  pharmacyCode: row.pharmacyCode,
   name: row.name,
   genericName: row.genericName,
   category: row.category,
@@ -25,11 +26,28 @@ const mapMedicine = (row) => ({
   updatedAt: row.updatedAt,
 });
 
+// @desc    List registered pharmacies
+// @route   GET /api/medicines/pharmacies
+// @access  Private
+exports.listPharmacies = asyncHandler(async (_req, res) => {
+  const rows = await query(
+    `SELECT DISTINCT pharmacy_code AS code
+     FROM users
+     WHERE pharmacy_code IS NOT NULL
+     ORDER BY pharmacy_code ASC`
+  );
+
+  res.json({
+    success: true,
+    data: rows.filter((row) => row.code),
+  });
+});
+
 // @desc    Get all medicines
 // @route   GET /api/medicines
 // @access  Private
 exports.getMedicines = asyncHandler(async (req, res) => {
-  const { search, category, lowStock, page = 1, limit = 10 } = req.query;
+  const { search, category, lowStock, pharmacyCode, page = 1, limit = 10 } = req.query;
   const currentPage = Number(page);
   const rowLimit = Number(limit);
   const offset = (currentPage - 1) * rowLimit;
@@ -42,8 +60,13 @@ exports.getMedicines = asyncHandler(async (req, res) => {
     throw new Error('Akun admin belum memiliki pharmacy_code');
   }
 
+  const targetPharmacyCode =
+    req.user.role === 'dokter' && pharmacyCode
+      ? String(pharmacyCode).trim().toUpperCase()
+      : req.user.pharmacyCode;
+
   whereClause += ' AND pharmacy_code = ?';
-  params.push(req.user.pharmacyCode);
+  params.push(targetPharmacyCode);
 
   if (search) {
     whereClause += ' AND (name LIKE ? OR generic_name LIKE ? OR code LIKE ?)';
@@ -64,6 +87,7 @@ exports.getMedicines = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -121,6 +145,7 @@ exports.getMedicine = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -222,6 +247,7 @@ exports.createMedicine = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -310,6 +336,7 @@ exports.updateMedicine = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -351,6 +378,7 @@ exports.updateStock = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -405,6 +433,7 @@ exports.updateStock = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -465,6 +494,7 @@ exports.getLowStockMedicines = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,
@@ -507,6 +537,7 @@ exports.getExpiringMedicines = asyncHandler(async (req, res) => {
     `SELECT
       id AS _id,
       code,
+      pharmacy_code AS pharmacyCode,
       name,
       generic_name AS genericName,
       category,

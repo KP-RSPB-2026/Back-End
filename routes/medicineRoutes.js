@@ -11,6 +11,7 @@ const {
   deleteMedicine,
   getLowStockMedicines,
   getExpiringMedicines,
+  listPharmacies,
 } = require('../controllers/medicineController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -43,6 +44,7 @@ const stockValidation = [
 router.use(protect);
 
 // Alert routes
+router.get('/pharmacies', listPharmacies);
 router.get('/alerts/low-stock', authorize('admin_apotik'), getLowStockMedicines);
 router.get('/alerts/expiring', authorize('admin_apotik'), getExpiringMedicines);
 

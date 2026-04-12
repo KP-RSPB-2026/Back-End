@@ -219,28 +219,67 @@ const seedData = async () => {
       );
     }
 
-    const [dokterResult] = await conn.execute(
-      `INSERT INTO users
-       (name, email, password, role, phone_number, specialization, license_number)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ,
-      [
-        'Dr. Budi Santoso',
-        'dokter@apotik.com',
-        dokterPassword,
-        'dokter',
-        '081234567891',
-        'Dokter Umum',
-        'SIP-123456789',
-      ]
-    );
+    const doctors = [
+      {
+        name: 'Dr. Sulaiman Bintoro',
+        email: 'dokter.apta@apotik.com',
+        phone: '081234567891',
+        specialization: 'Dokter Umum',
+        license: 'SIP-123456789',
+        pharmacyCode: 'APTA',
+      },
+      {
+        name: 'Dr. Maya Lestari',
+        email: 'dokter.aptb@apotik.com',
+        phone: '081234567902',
+        specialization: 'Dokter Umum',
+        license: 'SIP-123456790',
+        pharmacyCode: 'APTB',
+      },
+      {
+        name: 'Dr. Rudi Hartono',
+        email: 'dokter.aptc@apotik.com',
+        phone: '081234567903',
+        specialization: 'Dokter Umum',
+        license: 'SIP-123456791',
+        pharmacyCode: 'APTC',
+      },
+    ];
 
-    const dokterId = dokterResult.insertId;
+    const doctorIds = [];
+    for (const doctor of doctors) {
+      const [doctorResult] = await conn.execute(
+        `INSERT INTO users
+         (name, email, password, role, pharmacy_code, phone_number, specialization, license_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ,
+        [
+          doctor.name,
+          doctor.email,
+          dokterPassword,
+          'dokter',
+          doctor.pharmacyCode,
+          doctor.phone,
+          doctor.specialization,
+          doctor.license,
+        ]
+      );
+      doctorIds.push(doctorResult.insertId);
+    }
+
+    const dokterId = doctorIds[0];
 
     const patients = [
-      ['John Doe', '1985-05-15', 'Laki-laki', 'Jl. Merdeka No. 10, Jakarta', '081234567892', 'john@example.com', '3171234567890001', JSON.stringify(['Penisilin']), 'A+'],
-      ['Jane Smith', '1990-08-20', 'Perempuan', 'Jl. Sudirman No. 25, Jakarta', '081234567893', 'jane@example.com', '3171234567890002', JSON.stringify([]), 'B+'],
-      ['Ahmad Rahman', '1978-03-10', 'Laki-laki', 'Jl. Gatot Subroto No. 15, Jakarta', '081234567894', null, '3171234567890003', JSON.stringify(['Aspirin']), 'O+'],
+      ['Rizky Pratama', '1985-05-15', 'Laki-laki', 'Jl. Jenderal Sudirman No. 45, Balikpapan', '081234567892', 'rizky.pratama@example.com', '3171234567890001', JSON.stringify(['Penisilin']), 'A+'],
+      ['Siti Nur Aisyah', '1990-08-20', 'Perempuan', 'Jl. MT Haryono No. 18, Balikpapan', '081234567893', 'siti.aisyah@example.com', '3171234567890002', JSON.stringify([]), 'B+'],
+      ['Budi Santoso', '1978-03-10', 'Laki-laki', 'Jl. Ruhui Rahayu No. 22, Balikpapan', '081234567894', null, '3171234567890003', JSON.stringify(['Aspirin']), 'O+'],
+      ['Dewi Lestari', '1992-11-02', 'Perempuan', 'Jl. Ahmad Yani No. 12, Balikpapan', '081234567895', 'dewi.lestari@example.com', '3171234567890004', JSON.stringify(['Debu']), 'AB+'],
+      ['Fajar Nugroho', '1989-01-27', 'Laki-laki', 'Jl. Soekarno Hatta KM 5 No. 7, Balikpapan', '081234567896', 'fajar.nugroho@example.com', '3171234567890005', JSON.stringify([]), 'A-'],
+      ['Nabila Putri Maharani', '1996-06-14', 'Perempuan', 'Jl. Marsma R. Iswahyudi No. 30, Balikpapan', '081234567897', 'nabila.maharani@example.com', '3171234567890006', JSON.stringify(['Seafood']), 'B-'],
+      ['Andi Saputra', '1983-09-08', 'Laki-laki', 'Jl. Letjen Suprapto No. 9, Balikpapan', '081234567898', 'andi.saputra@example.com', '3171234567890007', JSON.stringify([]), 'O-'],
+      ['Rina Oktaviani', '1998-04-21', 'Perempuan', 'Jl. Pupuk Raya No. 16, Balikpapan', '081234567899', 'rina.oktaviani@example.com', '3171234567890008', JSON.stringify(['Udang']), 'A+'],
+      ['Yusuf Maulana', '1975-12-03', 'Laki-laki', 'Jl. Mulawarman No. 11, Balikpapan', '081234567900', null, '3171234567890009', JSON.stringify(['Asma']), 'B+'],
+      ['Intan Permatasari', '2000-07-19', 'Perempuan', 'Jl. Beller No. 24, Balikpapan', '081234567901', 'intan.permatasari@example.com', '3171234567890010', JSON.stringify([]), 'O+'],
     ];
 
     for (const patient of patients) {
@@ -258,13 +297,51 @@ const seedData = async () => {
       ['MED002', 'Amoxicillin 500mg', 'Amoxicillin', 'Kapsul', 'Indofarma', 'Antibiotik untuk infeksi bakteri', '500mg', 'Kapsul', 300, 50, 8000, '2025-10-31', 'BATCH-2024-002'],
       ['MED003', 'OBH Sirup', 'Diphenhydramine HCl', 'Sirup', 'Kalbe Farma', 'Obat batuk', '100ml', 'Botol', 150, 30, 15000, '2025-08-31', 'BATCH-2024-003'],
       ['MED004', 'Vitamin C 1000mg', 'Ascorbic Acid', 'Tablet', 'Kalbe Farma', 'Suplemen vitamin C', '1000mg', 'Tablet', 200, 50, 3000, '2026-12-31', 'BATCH-2024-004'],
-      ['MED005', 'Salep 88', 'Miconazole', 'Salep', 'Konimex', 'Obat untuk penyakit kulit', '10g', 'Tube', 80, 20, 12000, '2025-06-30', 'BATCH-2024-005'],
+      ['MED005', 'Salep Antijamur', 'Miconazole', 'Salep', 'Konimex', 'Obat untuk penyakit kulit', '10g', 'Tube', 80, 20, 12000, '2025-06-30', 'BATCH-2024-005'],
+      ['MED006', 'Ibuprofen 400mg', 'Ibuprofen', 'Tablet', 'Dexa Medica', 'Pereda nyeri dan antiinflamasi', '400mg', 'Tablet', 220, 50, 6500, '2026-01-31', 'BATCH-2024-006'],
+      ['MED007', 'Cetirizine 10mg', 'Cetirizine', 'Tablet', 'Sanbe Farma', 'Obat alergi', '10mg', 'Tablet', 190, 40, 4500, '2026-03-31', 'BATCH-2024-007'],
+      ['MED008', 'Omeprazole 20mg', 'Omeprazole', 'Kapsul', 'Kalbe Farma', 'Obat asam lambung', '20mg', 'Kapsul', 170, 35, 7000, '2026-05-31', 'BATCH-2024-008'],
+      ['MED009', 'Amlodipine 5mg', 'Amlodipine', 'Tablet', 'Kimia Farma', 'Obat hipertensi', '5mg', 'Tablet', 140, 30, 5500, '2026-07-31', 'BATCH-2024-009'],
+      ['MED010', 'Metformin 500mg', 'Metformin', 'Tablet', 'Indofarma', 'Obat diabetes', '500mg', 'Tablet', 160, 35, 6000, '2026-08-31', 'BATCH-2024-010'],
+      ['MED011', 'Antasida DOEN', 'Hydrotalcite + Mg(OH)2', 'Tablet', 'Tempo Scan', 'Obat maag', '1 tablet', 'Tablet', 130, 25, 4000, '2025-11-30', 'BATCH-2024-011'],
+      ['MED012', 'Loratadine 10mg', 'Loratadine', 'Tablet', 'Bernofarm', 'Obat alergi', '10mg', 'Tablet', 120, 25, 5000, '2026-09-30', 'BATCH-2024-012'],
     ];
 
+    const pharmacyMedicinePlan = {
+      APTA: { count: 10, stockMultiplier: 1.0 },
+      APTB: { count: 11, stockMultiplier: 0.8 },
+      APTC: { count: 12, stockMultiplier: 1.25 },
+    };
+
     for (const pharmacy of pharmacies) {
-      for (const medicine of baseMedicines) {
-        const [baseCode, ...rest] = medicine;
+      const plan = pharmacyMedicinePlan[pharmacy.code] || {
+        count: 10,
+        stockMultiplier: 1,
+      };
+
+      const medicinesForPharmacy = baseMedicines.slice(0, plan.count);
+
+      for (const [index, medicine] of medicinesForPharmacy.entries()) {
+        const [
+          baseCode,
+          name,
+          genericName,
+          category,
+          manufacturer,
+          description,
+          dosage,
+          unit,
+          stock,
+          minStock,
+          price,
+          expiryDate,
+          batchNumber,
+        ] = medicine;
+
         const codeWithPharmacy = `${baseCode}-${pharmacy.code}`;
+        const adjustedStock = Math.max(20, Math.round(stock * plan.stockMultiplier) + index * 2);
+        const adjustedMinStock = Math.max(10, Math.round(minStock * plan.stockMultiplier));
+
         await conn.execute(
           `INSERT INTO medicines
            (
@@ -272,7 +349,24 @@ const seedData = async () => {
              unit, stock, min_stock, price, expiry_date, batch_number, pharmacy_code, side_effects, contraindications
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ,
-          [codeWithPharmacy, ...rest, pharmacy.code, JSON.stringify([]), JSON.stringify([])]
+          [
+            codeWithPharmacy,
+            name,
+            genericName,
+            category,
+            manufacturer,
+            description,
+            dosage,
+            unit,
+            adjustedStock,
+            adjustedMinStock,
+            price,
+            expiryDate,
+            batchNumber,
+            pharmacy.code,
+            JSON.stringify([]),
+            JSON.stringify([]),
+          ]
         );
       }
     }
