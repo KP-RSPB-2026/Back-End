@@ -385,8 +385,9 @@ exports.createPrescription = asyncHandler(async (req, res) => {
 // @route   PATCH /api/prescriptions/:id/status
 // @access  Private (Admin Apotik)
 exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
-  const { status } = req.body;
+  const { status, reason } = req.body;
   const conn = await pool.getConnection();
+  const normalizedReason = typeof reason === 'string' ? reason.trim() : '';
 
   let prescription;
 
@@ -394,7 +395,7 @@ exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
     await conn.beginTransaction();
 
     const [prescriptionRows] = await conn.execute(
-      `SELECT id, status
+      `SELECT id, status, notes
        FROM prescriptions
        WHERE id = ?
        LIMIT 1
@@ -407,6 +408,31 @@ exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
     if (!prescription) {
       res.status(404);
       throw new Error('Resep tidak ditemukan');
+    }
+
+    if (prescription.status === 'selesai' && status !== 'selesai') {
+      res.status(400);
+      throw new Error('Resep yang sudah selesai tidak dapat diubah statusnya');
+    }
+
+    if (prescription.status === 'dibatalkan' && status !== 'dibatalkan') {
+      res.status(400);
+      throw new Error('Resep yang sudah dibatalkan tidak dapat diubah statusnya');
+    }
+
+    if (status === 'dibatalkan' && !normalizedReason) {
+      res.status(400);
+      throw new Error('Alasan penolakan wajib diisi');
+    }
+
+    let nextNotes = prescription.notes || '';
+    if (normalizedReason) {
+      const reasonPrefix = status === 'dibatalkan'
+        ? 'Catatan Admin (Ditolak):'
+        : 'Catatan Admin (Disetujui):';
+      nextNotes = nextNotes
+        ? `${nextNotes}\n${reasonPrefix} ${normalizedReason}`
+        : `${reasonPrefix} ${normalizedReason}`;
     }
 
     // If status is 'selesai', reduce medicine stock
@@ -438,15 +464,21 @@ exports.updatePrescriptionStatus = asyncHandler(async (req, res) => {
 
       await conn.execute(
         `UPDATE prescriptions
-         SET status = ?, completed_date = NOW(), completed_by = ?
+         SET status = ?, notes = ?, completed_date = NOW(), completed_by = ?
          WHERE id = ?`,
-        [status, req.user._id, req.params.id]
+        [status, nextNotes, req.user._id, req.params.id]
       );
     } else {
-      await conn.execute('UPDATE prescriptions SET status = ? WHERE id = ?', [
-        status,
-        req.params.id,
-      ]);
+      await conn.execute(
+        `UPDATE prescriptions
+         SET
+           status = ?,
+           notes = ?,
+           completed_date = CASE WHEN ? = 'selesai' THEN NOW() ELSE NULL END,
+           completed_by = CASE WHEN ? = 'selesai' THEN ? ELSE NULL END
+         WHERE id = ?`,
+        [status, nextNotes, status, status, req.user._id, req.params.id]
+      );
     }
 
     await conn.commit();
