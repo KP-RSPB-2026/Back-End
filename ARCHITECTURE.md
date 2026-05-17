@@ -1,458 +1,91 @@
-# Arsitektur Sistem Backend
+# Arsitektur Sistem Frontend
 
-## 1. Arsitektur Keseluruhan
+Dokumen ini menjelaskan alur sistem frontend saja (React + Vite) berdasarkan implementasi saat ini.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      CLIENT LAYER                            │
-│  (Mobile App / Web App / API Testing Tools)                  │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            │ HTTP/HTTPS
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    API GATEWAY LAYER                         │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Express Server (server.js)                          │  │
-│  │  - CORS Middleware                                   │  │
-│  │  - Body Parser                                       │  │
-│  │  - Route Handler                                     │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    MIDDLEWARE LAYER                          │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │ Auth         │  │ Validator    │  │ Error Handler   │  │
-│  │ Middleware   │  │ Middleware   │  │                 │  │
-│  └──────────────┘  └──────────────┘  └─────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     ROUTES LAYER                             │
-│                                                              │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │ Auth     │ │ Patient  │ │ Medicine │ │ Prescription │  │
-│  │ Routes   │ │ Routes   │ │ Routes   │ │ Routes       │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  │
-│                           ┌──────────┐                      │
-│                           │ Transfer │                      │
-│                           │ Routes   │                      │
-│                           └──────────┘                      │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  CONTROLLERS LAYER                           │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐   │
-│  │ Auth         │  │ Patient      │  │ Medicine       │   │
-│  │ Controller   │  │ Controller   │  │ Controller     │   │
-│  └──────────────┘  └──────────────┘  └────────────────┘   │
-│  ┌──────────────┐  ┌──────────────┐                       │
-│  │ Prescription │  │ Transfer     │                       │
-│  │ Controller   │  │ Controller   │                       │
-│  └──────────────┘  └──────────────┘                       │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     MODELS LAYER                             │
-│                   (Mongoose Schemas)                         │
-│                                                              │
-│  ┌──────┐ ┌─────────┐ ┌──────────┐ ┌──────────────┐       │
-│  │ User │ │ Patient │ │ Medicine │ │ Prescription │       │
-│  └──────┘ └─────────┘ └──────────┘ └──────────────┘       │
-│                    ┌──────────────────┐                     │
-│                    │ MedicineTransfer │                     │
-│                    └──────────────────┘                     │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    DATABASE LAYER                            │
-│                                                              │
-│                    ┌─────────────┐                          │
-│                    │   MongoDB   │                          │
-│                    └─────────────┘                          │
-└─────────────────────────────────────────────────────────────┘
+## 1. Diagram Alur Utama Frontend
+
+```mermaid
+flowchart TD
+    U[Pengguna] --> B[Browser]
+    B --> M[src/main.jsx]
+    M --> A[src/app/App.jsx]
+    A --> P[src/app/providers.jsx]
+    P --> C[AuthProvider useAuth]
+    C --> R[RouterProvider]
+    R --> RT[src/app/router.jsx]
+
+    RT --> L[/login]
+    RT --> D[/doctor/*]
+    RT --> AD[/admin/*]
+
+    L --> SVC[auth.service login]
+    SVC --> AX[Axios Instance src/lib/axios.js]
+    AX --> API[(REST API)]
+    API --> AX
+    AX --> ST[storage simpan user + token]
+    ST --> C
 ```
 
-## 2. Request Flow
+## 2. Diagram Routing Frontend
 
-### Contoh: Dokter Membuat Resep
+```mermaid
+flowchart LR
+    ROOT[/] --> LOGIN[/login]
+    WILDCARD[*] --> LOGIN
 
-```
-1. Client Request
-   POST /api/prescriptions
-   Headers: { Authorization: Bearer TOKEN }
-   Body: { patient, medicines, diagnosis }
-          ↓
-2. Express Server
-   - Parse request body
-   - Apply CORS
-          ↓
-3. Auth Middleware
-   - Verify JWT token
-   - Extract user from token
-   - Check if user is active
-          ↓
-4. Authorize Middleware
-   - Check if role = 'dokter'
-          ↓
-5. Validation Middleware
-   - Validate request body
-   - Check required fields
-          ↓
-6. Prescription Routes
-   - Route to createPrescription
-          ↓
-7. Prescription Controller
-   - Verify patient exists
-   - Verify medicines exist
-   - Calculate total price
-   - Create prescription
-   - Auto-generate prescription number
-          ↓
-8. Mongoose Model
-   - Save to MongoDB
-   - Run pre-save hooks
-          ↓
-9. MongoDB
-   - Store document
-   - Return saved document
-          ↓
-10. Response
-   - Populate related data
-   - Send JSON response to client
+    LOGIN --> DROOT[/doctor]
+    LOGIN --> AROOT[/admin]
+
+    DROOT --> DDASH[/doctor/dashboard]
+    DROOT --> DCREATE[/doctor/prescription/create]
+    DROOT --> DSTATUS[/doctor/prescription/status]
+    DROOT --> DDETAIL[/doctor/prescription/:id]
+
+    AROOT --> ADASH[/admin/dashboard]
+    AROOT --> AMED[/admin/medicine]
+    AROOT --> ASTOCK[/admin/stock]
+    AROOT --> AINCOMING[/admin/incoming-request]
+    AROOT --> AAPPROVAL[/admin/prescription-approval]
+    AROOT --> AREQ[/admin/request/create]
+    AROOT --> ADETAIL[/admin/prescription/:id]
 ```
 
-## 3. Database Schema Relationships
+## 3. Diagram Login dan Penyimpanan Session (Frontend)
 
-```
-┌─────────────┐
-│    User     │
-│  (Dokter/   │
-│   Admin)    │
-└─────────────┘
-      │
-      │ createdBy
-      ▼
-┌─────────────┐         ┌─────────────────┐
-│   Patient   │────────▶│  Prescription   │
-└─────────────┘ patient └─────────────────┘
-                              │
-                              │ doctor
-                              ▼
-                        ┌─────────────┐
-                        │    User     │
-                        │  (Dokter)   │
-                        └─────────────┘
-                              │
-                              │ completedBy
-                              ▼
-                        ┌─────────────┐
-                        │    User     │
-                        │   (Admin)   │
-                        └─────────────┘
-
-┌──────────────┐       ┌─────────────────┐
-│   Medicine   │◀──────│  Prescription   │
-└──────────────┘       │    .medicines   │
-                       └─────────────────┘
-
-┌──────────────┐       ┌──────────────────┐
-│   Medicine   │◀──────│ MedicineTransfer │
-└──────────────┘       │    .medicines    │
-                       └──────────────────┘
-                              │
-                              │ requestedBy
-                              ▼
-                        ┌─────────────┐
-                        │    User     │
-                        │   (Admin)   │
-                        └─────────────┘
+```mermaid
+flowchart TD
+    A[User isi email dan password] --> B[LoginPage]
+    B --> C[useAuth.login]
+    C --> D[authService.login]
+    D --> E[POST /api/auth/login via axios]
+    E --> F{Login berhasil?}
+    F -- Tidak --> G[Tampilkan error di UI]
+    F -- Ya --> H[Simpan user ke storage key user]
+    H --> I[Simpan token ke storage key token]
+    I --> J[setUser state AuthContext]
+    J --> K[Navigasi ke halaman sesuai role]
 ```
 
-## 4. Authentication Flow
+## 4. Diagram Request API dari Frontend
 
-```
-┌────────────┐
-│   Client   │
-└────────────┘
-      │
-      │ POST /api/auth/login
-      │ { email, password }
-      ▼
-┌─────────────────┐
-│ Auth Controller │
-└─────────────────┘
-      │
-      │ 1. Find user by email
-      ▼
-┌─────────────┐
-│  Database   │
-└─────────────┘
-      │
-      │ 2. User found?
-      ▼
-┌─────────────────┐
-│   User Model    │
-│ .matchPassword()│
-└─────────────────┘
-      │
-      │ 3. Compare hashed password
-      ▼
-┌─────────────────┐
-│   bcryptjs      │
-└─────────────────┘
-      │
-      │ 4. Password valid?
-      ▼
-┌─────────────────┐
-│  Generate JWT   │
-│  (jsonwebtoken) │
-└─────────────────┘
-      │
-      │ 5. Return token
-      ▼
-┌────────────┐
-│   Client   │
-│ Save token │
-└────────────┘
-      │
-      │ Subsequent requests
-      │ Header: Authorization: Bearer TOKEN
-      ▼
-┌─────────────────┐
-│ Auth Middleware │
-└─────────────────┘
-      │
-      │ 1. Extract token
-      │ 2. Verify token
-      │ 3. Decode user ID
-      │ 4. Load user
-      │ 5. Attach to req.user
-      ▼
-┌─────────────────┐
-│   Controller    │
-│ Access req.user │
-└─────────────────┘
+```mermaid
+flowchart TD
+    A[Halaman fitur memanggil service] --> B[Service memanggil axios instance]
+    B --> C[Request interceptor membaca token dari storage]
+    C --> D{Token tersedia?}
+    D -- Ya --> E[Tambahkan Authorization Bearer token]
+    D -- Tidak --> F[Kirim request tanpa header token]
+    E --> G[Kirim request ke API]
+    F --> G
+    G --> H[Terima response]
+    H --> I[Update state dan render ulang komponen]
 ```
 
-## 5. Medicine Stock Management Flow
+## 5. Ringkasan Komponen Kunci Frontend
 
-```
-SCENARIO 1: Admin Menambah Stok Manual
-┌──────────┐
-│  Admin   │
-└──────────┘
-     │ PATCH /medicines/:id/stock
-     │ { quantity: 50, operation: 'add' }
-     ▼
-┌──────────────────┐
-│ Medicine         │
-│ Controller       │
-│ .updateStock()   │
-└──────────────────┘
-     │ medicine.stock += 50
-     │ medicine.save()
-     ▼
-┌──────────────────┐
-│    Database      │
-│  stock updated   │
-└──────────────────┘
-
-SCENARIO 2: Resep Selesai - Stok Berkurang Otomatis
-┌──────────┐
-│  Admin   │
-└──────────┘
-     │ PATCH /prescriptions/:id/status
-     │ { status: 'selesai' }
-     ▼
-┌──────────────────────┐
-│ Prescription         │
-│ Controller           │
-│ .updateStatus()      │
-└──────────────────────┘
-     │ Loop each medicine
-     │ in prescription
-     ▼
-┌──────────────────┐
-│ Medicine Model   │
-│ stock -= qty     │
-│ save()           │
-└──────────────────┘
-     │ Check if stock enough
-     │ Reduce stock
-     ▼
-┌──────────────────┐
-│    Database      │
-│  stock updated   │
-└──────────────────┘
-
-SCENARIO 3: Terima Transfer - Stok Bertambah Otomatis
-┌──────────┐
-│  Admin   │
-└──────────┘
-     │ PATCH /transfers/:id/status
-     │ { status: 'diterima' }
-     ▼
-┌──────────────────────┐
-│ Transfer             │
-│ Controller           │
-│ .updateStatus()      │
-└──────────────────────┘
-     │ If type = 'receive'
-     │ Loop each medicine
-     ▼
-┌──────────────────┐
-│ Medicine Model   │
-│ stock += qty     │
-│ save()           │
-└──────────────────┘
-     │ Add to stock
-     ▼
-┌──────────────────┐
-│    Database      │
-│  stock updated   │
-└──────────────────┘
-```
-
-## 6. Role-Based Access Control
-
-```
-┌──────────────────────────────────────────────────┐
-│                  DOKTER ROLE                      │
-├──────────────────────────────────────────────────┤
-│ ✓ Login & Logout                                 │
-│ ✓ Manage own profile                             │
-│ ✓ View all patients                              │
-│ ✓ Create patient                                 │
-│ ✓ Update patient                                 │
-│ ✓ Delete patient (soft delete)                   │
-│ ✓ View medicines (read-only)                     │
-│ ✓ View own prescriptions                         │
-│ ✓ Create prescription                            │
-│ ✓ Cancel own prescription (if not completed)     │
-│ ✗ Manage medicine stock                          │
-│ ✗ Process prescriptions                          │
-│ ✗ Manage transfers                               │
-└──────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────┐
-│              ADMIN APOTIK ROLE                    │
-├──────────────────────────────────────────────────┤
-│ ✓ Login & Logout                                 │
-│ ✓ Manage own profile                             │
-│ ✓ View all patients (read-only)                  │
-│ ✓ View all medicines                             │
-│ ✓ Create medicine                                │
-│ ✓ Update medicine                                │
-│ ✓ Delete medicine (soft delete)                  │
-│ ✓ Update medicine stock                          │
-│ ✓ View low stock alerts                          │
-│ ✓ View expiring medicines                        │
-│ ✓ View all prescriptions                         │
-│ ✓ Update prescription status                     │
-│ ✓ View all transfers                             │
-│ ✓ Create transfer request                        │
-│ ✓ Create transfer receive                        │
-│ ✓ Update transfer status                         │
-│ ✓ Cancel transfer                                │
-│ ✗ Create patient                                 │
-│ ✗ Create prescription                            │
-└──────────────────────────────────────────────────┘
-```
-
-## 7. Technology Stack
-
-```
-┌─────────────────────────────────────────┐
-│         RUNTIME ENVIRONMENT              │
-│            Node.js v14+                  │
-└─────────────────────────────────────────┘
-                  │
-    ┌─────────────┴─────────────┐
-    │                           │
-┌───▼────────┐          ┌───────▼──────┐
-│  Backend   │          │   Database   │
-│  Express   │◀────────▶│   MongoDB    │
-│   v4.18    │          │              │
-└────────────┘          └──────────────┘
-    │
-    ├── Mongoose ODM v8.0
-    ├── bcryptjs (password hashing)
-    ├── jsonwebtoken (JWT auth)
-    ├── express-validator (validation)
-    ├── express-async-handler (async error handling)
-    ├── cors (cross-origin)
-    └── dotenv (environment config)
-```
-
-## 8. Security Measures
-
-```
-1. Password Security
-   ├── Hashing dengan bcryptjs
-   ├── Salt rounds: 10
-   └── Password tidak pernah di-return dalam response
-
-2. Authentication
-   ├── JWT token-based
-   ├── Token expiry: 7 days (configurable)
-   └── Token verification di setiap protected route
-
-3. Authorization
-   ├── Role-based access control
-   ├── Route-level authorization
-   └── Resource-level authorization (dokter hanya bisa akses resep sendiri)
-
-4. Validation
-   ├── Input validation dengan express-validator
-   ├── Mongoose schema validation
-   └── Custom business logic validation
-
-5. Error Handling
-   ├── Centralized error handler
-   ├── Tidak expose stack trace di production
-   └── Consistent error response format
-
-6. CORS
-   ├── Configurable allowed origins
-   └── Credentials support
-```
-
-## 9. Data Flow Examples
-
-### Example 1: Low Stock Alert
-```
-Scheduler/Cron Job (optional)
-        ↓
-GET /medicines/alerts/low-stock
-        ↓
-Medicine.find({ $expr: { $lte: ['$stock', '$minStock'] } })
-        ↓
-Return medicines with stock <= minStock
-```
-
-### Example 2: Auto-generate Numbers
-```
-Create Prescription
-        ↓
-pre-save hook triggered
-        ↓
-Count existing prescriptions
-        ↓
-Generate: RX + YYYYMM + 00001
-        ↓
-RX202401000001
-```
-
----
-
-**Diagram ini menjelaskan arsitektur lengkap dari sistem backend yang telah dibuat.**
+1. Bootstrapping aplikasi: `src/main.jsx`
+2. Root app dan router: `src/app/App.jsx`
+3. Auth context provider: `src/app/providers.jsx`, `src/hooks/useAuth.jsx`
+4. Definisi route: `src/app/router.jsx`
+5. HTTP client + token interceptor: `src/lib/axios.js`
+6. Utility guard yang tersedia: `src/utils/ProtectedRoute.jsx`, `src/utils/RoleGuard.jsx`

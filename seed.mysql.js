@@ -186,13 +186,7 @@ const seedData = async () => {
       'ALTER TABLE medicines ADD INDEX IF NOT EXISTS idx_medicines_pharmacy (pharmacy_code)'
     );
 
-    await conn.execute('DELETE FROM medicine_transfer_items');
-    await conn.execute('DELETE FROM medicine_transfers');
-    await conn.execute('DELETE FROM prescription_items');
-    await conn.execute('DELETE FROM prescriptions');
-    await conn.execute('DELETE FROM medicines');
-    await conn.execute('DELETE FROM patients');
-    await conn.execute('DELETE FROM users');
+    // Incremental seed: keep existing data and only add missing rows.
 
     const adminPassword = await bcrypt.hash('admin123', 10);
     const dokterPassword = await bcrypt.hash('dokter123', 10);
@@ -205,7 +199,7 @@ const seedData = async () => {
 
     for (const [index, pharmacy] of pharmacies.entries()) {
       await conn.execute(
-        `INSERT INTO users (name, email, password, role, pharmacy_code, phone_number)
+        `INSERT IGNORE INTO users (name, email, password, role, pharmacy_code, phone_number)
          VALUES (?, ?, ?, ?, ?, ?)`
         ,
         [
@@ -246,10 +240,9 @@ const seedData = async () => {
       },
     ];
 
-    const doctorIds = [];
     for (const doctor of doctors) {
-      const [doctorResult] = await conn.execute(
-        `INSERT INTO users
+      await conn.execute(
+        `INSERT IGNORE INTO users
          (name, email, password, role, pharmacy_code, phone_number, specialization, license_number)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         ,
@@ -264,10 +257,17 @@ const seedData = async () => {
           doctor.license,
         ]
       );
-      doctorIds.push(doctorResult.insertId);
     }
 
-    const dokterId = doctorIds[0];
+    const [doctorRows] = await conn.execute(
+      'SELECT id FROM users WHERE email = ? LIMIT 1',
+      [doctors[0].email]
+    );
+    const dokterId = doctorRows[0]?.id;
+
+    if (!dokterId) {
+      throw new Error('Gagal mengambil ID dokter untuk seed pasien');
+    }
 
     const patients = [
       ['Rizky Pratama', '1985-05-15', 'Laki-laki', 'Jl. Jenderal Sudirman No. 45, Balikpapan', '081234567892', 'rizky.pratama@example.com', '3171234567890001', JSON.stringify(['Penisilin']), 'A+'],
@@ -282,9 +282,36 @@ const seedData = async () => {
       ['Intan Permatasari', '2000-07-19', 'Perempuan', 'Jl. Beller No. 24, Balikpapan', '081234567901', 'intan.permatasari@example.com', '3171234567890010', JSON.stringify([]), 'O+'],
     ];
 
+    const additionalPatients = [
+      ['Ahmad Syafiq', '1984-02-11', 'Laki-laki', 'Jl. Mulawarman No. 31, Balikpapan', '081234567902', 'ahmad.syafiq@example.com', '3171234567890011', JSON.stringify([]), 'A+'],
+      ['Nisa Rahmawati', '1993-05-09', 'Perempuan', 'Jl. MT Haryono No. 22, Balikpapan', '081234567903', 'nisa.rahmawati@example.com', '3171234567890012', JSON.stringify(['Debu']), 'B+'],
+      ['Rizal Fadillah', '1987-10-17', 'Laki-laki', 'Jl. Letjen S. Parman No. 5, Balikpapan', '081234567904', null, '3171234567890013', JSON.stringify([]), 'O+'],
+      ['Ayu Lestari', '1995-01-25', 'Perempuan', 'Jl. Soekarno Hatta KM 8 No. 14, Balikpapan', '081234567905', 'ayu.lestari@example.com', '3171234567890014', JSON.stringify(['Makanan laut']), 'AB+'],
+      ['Dimas Pratama', '1979-08-30', 'Laki-laki', 'Jl. Jenderal Sudirman No. 61, Balikpapan', '081234567906', 'dimas.pratama@example.com', '3171234567890015', JSON.stringify(['Asam lambung']), 'A-'],
+      ['Salsa Maharani', '2001-03-14', 'Perempuan', 'Jl. Pupuk Raya No. 8, Balikpapan', '081234567907', 'salsa.maharani@example.com', '3171234567890016', JSON.stringify([]), 'B-'],
+      ['Hendra Wijaya', '1982-06-22', 'Laki-laki', 'Jl. Ahmad Yani No. 44, Balikpapan', '081234567908', 'hendra.wijaya@example.com', '3171234567890017', JSON.stringify(['Aspirin']), 'O-'],
+      ['Maya Putri', '1990-09-12', 'Perempuan', 'Jl. Marsma R. Iswahyudi No. 18, Balikpapan', '081234567909', 'maya.putri@example.com', '3171234567890018', JSON.stringify([]), 'A+'],
+      ['Fikri Ramadhan', '1986-12-07', 'Laki-laki', 'Jl. Ruhui Rahayu No. 27, Balikpapan', '081234567910', null, '3171234567890019', JSON.stringify(['Udang']), 'B+'],
+      ['Citra Permata', '1997-04-03', 'Perempuan', 'Jl. Beller No. 33, Balikpapan', '081234567911', 'citra.permata@example.com', '3171234567890020', JSON.stringify([]), 'O+'],
+      ['Bayu Saputra', '1988-07-28', 'Laki-laki', 'Jl. Mulawarman No. 19, Balikpapan', '081234567912', 'bayu.saputra@example.com', '3171234567890021', JSON.stringify(['Penisilin']), 'AB+'],
+      ['Tasya Indah', '1994-11-16', 'Perempuan', 'Jl. Soekarno Hatta KM 3 No. 9, Balikpapan', '081234567913', 'tasya.indah@example.com', '3171234567890022', JSON.stringify([]), 'A-'],
+      ['Rangga Kurnia', '1981-02-19', 'Laki-laki', 'Jl. Letjen Suprapto No. 20, Balikpapan', '081234567914', null, '3171234567890023', JSON.stringify(['Debu']), 'B-'],
+      ['Nadia Safira', '1999-10-05', 'Perempuan', 'Jl. Jenderal Sudirman No. 72, Balikpapan', '081234567915', 'nadia.safira@example.com', '3171234567890024', JSON.stringify([]), 'O+'],
+      ['Yoga Prakoso', '1976-03-24', 'Laki-laki', 'Jl. Pupuk Raya No. 25, Balikpapan', '081234567916', 'yoga.prakoso@example.com', '3171234567890025', JSON.stringify(['Asma']), 'A+'],
+      ['Lina Kurniasih', '1991-12-21', 'Perempuan', 'Jl. MT Haryono No. 39, Balikpapan', '081234567917', 'lina.kurniasih@example.com', '3171234567890026', JSON.stringify([]), 'B+'],
+      ['Reza Aditya', '1985-05-30', 'Laki-laki', 'Jl. Ahmad Yani No. 28, Balikpapan', '081234567918', 'reza.aditya@example.com', '3171234567890027', JSON.stringify(['Seafood']), 'O-'],
+      ['Mutiara Sari', '2002-01-13', 'Perempuan', 'Jl. Marsma R. Iswahyudi No. 41, Balikpapan', '081234567919', null, '3171234567890028', JSON.stringify([]), 'AB+'],
+      ['Arif Setiawan', '1983-09-29', 'Laki-laki', 'Jl. Beller No. 12, Balikpapan', '081234567920', 'arif.setiawan@example.com', '3171234567890029', JSON.stringify(['Aspirin']), 'A+'],
+      ['Putri Amelia', '1996-08-08', 'Perempuan', 'Jl. Ruhui Rahayu No. 14, Balikpapan', '081234567921', 'putri.amelia@example.com', '3171234567890030', JSON.stringify([]), 'B-'],
+    ];
+
+    for (const patient of additionalPatients) {
+      patients.push(patient);
+    }
+
     for (const patient of patients) {
       await conn.execute(
-        `INSERT INTO patients
+        `INSERT IGNORE INTO patients
          (name, date_of_birth, gender, address, phone_number, email, id_number, allergies, blood_type, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ,
@@ -307,6 +334,29 @@ const seedData = async () => {
       ['MED012', 'Loratadine 10mg', 'Loratadine', 'Tablet', 'Bernofarm', 'Obat alergi', '10mg', 'Tablet', 120, 25, 5000, '2026-09-30', 'BATCH-2024-012'],
     ];
 
+    const additionalMedicineTemplates = [
+      ['MED013', 'Antasida Tablet', 'Antacid Complex', 'Tablet', 'Hexpharm', 'Obat untuk mengurangi asam lambung', '1 tablet', 'Tablet', 140, 30, 4500, '2026-04-30', 'BATCH-2024-013'],
+      ['MED014', 'Ranitidine 150mg', 'Ranitidine', 'Tablet', 'Tempo Scan', 'Obat tukak lambung', '150mg', 'Tablet', 110, 20, 6200, '2026-05-31', 'BATCH-2024-014'],
+      ['MED015', 'Ambroxol Sirup', 'Ambroxol HCl', 'Sirup', 'Sanbe Farma', 'Obat pengencer dahak', '60ml', 'Botol', 160, 35, 9800, '2026-06-30', 'BATCH-2024-015'],
+      ['MED016', 'Diazepam 2mg', 'Diazepam', 'Tablet', 'Kimia Farma', 'Obat penenang', '2mg', 'Tablet', 90, 15, 7200, '2026-07-31', 'BATCH-2024-016'],
+      ['MED017', 'Cetirizine Sirup', 'Cetirizine', 'Sirup', 'Kalbe Farma', 'Obat alergi untuk anak', '60ml', 'Botol', 150, 30, 10500, '2026-08-31', 'BATCH-2024-017'],
+      ['MED018', 'Mefenamic Acid 500mg', 'Mefenamic Acid', 'Tablet', 'Dexa Medica', 'Pereda nyeri haid dan nyeri ringan', '500mg', 'Tablet', 175, 40, 6700, '2026-09-30', 'BATCH-2024-018'],
+      ['MED019', 'Vitamin B Complex', 'Vitamin B Complex', 'Tablet', 'Bernofarm', 'Suplemen vitamin B', '1 tablet', 'Tablet', 210, 50, 5200, '2026-10-31', 'BATCH-2024-019'],
+      ['MED020', 'Cefixime 100mg', 'Cefixime', 'Kapsul', 'Indofarma', 'Antibiotik spektrum luas', '100mg', 'Kapsul', 95, 20, 12800, '2026-11-30', 'BATCH-2024-020'],
+      ['MED021', 'Dexamethasone 0.5mg', 'Dexamethasone', 'Tablet', 'Tempo Scan', 'Obat antiinflamasi', '0.5mg', 'Tablet', 125, 25, 4800, '2026-12-31', 'BATCH-2024-021'],
+      ['MED022', 'Guaifenesin Sirup', 'Guaifenesin', 'Sirup', 'Konimex', 'Obat batuk berdahak', '100ml', 'Botol', 135, 25, 8900, '2026-03-31', 'BATCH-2024-022'],
+      ['MED023', 'Loperamide 2mg', 'Loperamide', 'Tablet', 'Kimia Farma', 'Obat diare', '2mg', 'Tablet', 180, 40, 3600, '2026-04-30', 'BATCH-2024-023'],
+      ['MED024', 'Asam Mefenamat 500mg', 'Mefenamic Acid', 'Tablet', 'Dexa Medica', 'Pereda nyeri', '500mg', 'Tablet', 155, 30, 6900, '2026-05-31', 'BATCH-2024-024'],
+      ['MED025', 'Salbutamol 2mg', 'Salbutamol', 'Tablet', 'Kalbe Farma', 'Obat asma', '2mg', 'Tablet', 100, 20, 7600, '2026-06-30', 'BATCH-2024-025'],
+      ['MED026', 'Omeprazole 10mg', 'Omeprazole', 'Kapsul', 'Sanbe Farma', 'Obat asam lambung', '10mg', 'Kapsul', 145, 30, 8400, '2026-07-31', 'BATCH-2024-026'],
+      ['MED027', 'Multivitamin Anak', 'Multivitamin', 'Sirup', 'Bernofarm', 'Suplemen untuk anak', '60ml', 'Botol', 170, 35, 11200, '2026-08-31', 'BATCH-2024-027'],
+      ['MED028', 'Amlodipine 10mg', 'Amlodipine', 'Tablet', 'Indofarma', 'Obat hipertensi', '10mg', 'Tablet', 115, 25, 6100, '2026-09-30', 'BATCH-2024-028'],
+      ['MED029', 'Metformin XR 500mg', 'Metformin', 'Tablet', 'Kimia Farma', 'Obat diabetes', '500mg', 'Tablet', 130, 30, 7300, '2026-10-31', 'BATCH-2024-029'],
+      ['MED030', 'Clindamycin 300mg', 'Clindamycin', 'Kapsul', 'Dexa Medica', 'Antibiotik untuk infeksi kulit', '300mg', 'Kapsul', 85, 15, 14900, '2026-11-30', 'BATCH-2024-030'],
+      ['MED031', 'Povidone Iodine', 'Povidone Iodine', 'Cair', 'Konimex', 'Antiseptik luka', '100ml', 'Botol', 190, 40, 9200, '2026-12-31', 'BATCH-2024-031'],
+      ['MED032', 'Albendazole 400mg', 'Albendazole', 'Tablet', 'Tempo Scan', 'Obat cacing', '400mg', 'Tablet', 105, 20, 6800, '2026-03-31', 'BATCH-2024-032'],
+    ];
+
     const pharmacyMedicinePlan = {
       APTA: { count: 10, stockMultiplier: 1.0 },
       APTB: { count: 11, stockMultiplier: 0.8 },
@@ -319,7 +369,10 @@ const seedData = async () => {
         stockMultiplier: 1,
       };
 
-      const medicinesForPharmacy = baseMedicines.slice(0, plan.count);
+      const medicinesForPharmacy = [
+        ...baseMedicines.slice(0, plan.count),
+        ...additionalMedicineTemplates,
+      ];
 
       for (const [index, medicine] of medicinesForPharmacy.entries()) {
         const [
@@ -343,7 +396,7 @@ const seedData = async () => {
         const adjustedMinStock = Math.max(10, Math.round(minStock * plan.stockMultiplier));
 
         await conn.execute(
-          `INSERT INTO medicines
+          `INSERT IGNORE INTO medicines
            (
              code, name, generic_name, category, manufacturer, description, dosage,
              unit, stock, min_stock, price, expiry_date, batch_number, pharmacy_code, side_effects, contraindications
